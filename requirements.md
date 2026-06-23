@@ -275,8 +275,20 @@ MDReader 是一款基于 Tauri 2.x 的跨平台 Markdown 阅读器，采用极�
 
 ## 目标平台
 
-- Windows
-- macOS
+- **Windows**（优先）
+  - 单文件可执行程序（.exe）
+  - 配置文件存储：`%APPDATA%\MDReader\config.json`
+  - 用户数据目录：`%APPDATA%\MDReader\`
+  - 支持静默安装/卸载
+
+- **macOS**（后续支持）
+
+## 构建目标
+
+- **单文件可执行程序**：使用 Tauri bundle 生成单个 .exe 文件
+- **无需安装**：双击即可运行
+- **便携模式**：支持从任意位置运行（可选）
+- **自动更新**：支持应用自动更新（可选）
 
 ## 设计原则
 
