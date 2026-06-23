@@ -1,0 +1,27 @@
+{
+  "peers": {
+    "codebuddy-01": {
+      "peerId": "codebuddy-01",
+      "editorKind": "codebuddy",
+      "instanceName": "Codebuddy 01",
+      "port": 47632,
+      "workspaceRoots": [
+        "D:/workspace/SimpleMarkdownViewer"
+      ],
+      "supportedProjectTypes": [
+        "all"
+      ],
+      "projectType": "all"
+    }
+  },
+  "typeHierarchy": {
+    "all": []
+  },
+  "routing": {
+    "requestTimeoutMs": 3000
+  },
+  "ui": {
+    "statusBar": true,
+    "focusOnJump": false
+  }
+}
