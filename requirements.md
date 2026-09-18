@@ -257,7 +257,7 @@ MDReader 是一款基于 Tauri 2.x 的跨平台 Markdown 阅读器，采用极�
 
 ## 扩展功能
 
-### 11. 复杂数学公式（LaTeX / KaTeX）🆕 待实现
+### 11. 复杂数学公式（LaTeX / KaTeX）✅
 
 **需求描述**
 - 支持渲染 LaTeX 数学公式
@@ -272,7 +272,7 @@ MDReader 是一款基于 Tauri 2.x 的跨平台 Markdown 阅读器，采用极�
 
 ---
 
-### 12. 自定义协议超链接（跳转外部程序）🆕 待实现
+### 12. 自定义协议超链接（跳转外部程序）✅
 
 **需求描述**
 - 支持自定义协议的超链接
@@ -298,7 +298,7 @@ MDReader 是一款基于 Tauri 2.x 的跨平台 Markdown 阅读器，采用极�
 | Markdown 解析 | markdown-it |
 | 代码高亮 | highlight.js |
 | 图表渲染 | Mermaid + PlantUML |
-| 数学公式 | KaTeX (待实现) |
+| 数学公式 | KaTeX |
 
 ## 目标平台
 

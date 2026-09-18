@@ -4,6 +4,19 @@
       "peerId": "codebuddy-01",
       "editorKind": "codebuddy",
       "instanceName": "Codebuddy 01",
+      "port": 47633,
+      "workspaceRoots": [
+        "D:/workspace/SimpleMarkdownViewer"
+      ],
+      "supportedProjectTypes": [
+        "all"
+      ],
+      "projectType": "all"
+    },
+    "cursor-01": {
+      "peerId": "cursor-01",
+      "editorKind": "cursor",
+      "instanceName": "Cursor 01",
       "port": 47632,
       "workspaceRoots": [
         "D:/workspace/SimpleMarkdownViewer"
