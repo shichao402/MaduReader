@@ -1,0 +1,417 @@
+/* 亮色主题 - 完整版本 */
+:root {
+  /* 主色调 */
+  --primary-color: #3b82f6;
+  --primary-hover: #2563eb;
+  --primary-active: #1d4ed8;
+  --primary-light: #dbeafe;
+  --primary-bg: #eff6ff;
+  
+  /* 成功/警告/危险 */
+  --success-color: #10b981;
+  --success-bg: #d1fae5;
+  --success-light: #ecfdf5;
+  
+  --warning-color: #f59e0b;
+  --warning-bg: #fef3c7;
+  --warning-light: #fffbeb;
+  
+  --danger-color: #dc2626;
+  --danger-bg: #fee2e2;
+  --danger-light: #fef2f2;
+  --danger-hover: #b91c1c;
+  
+  /* 文本颜色 */
+  --text-primary: #111827;
+  --text-secondary: #6b7280;
+  --text-tertiary: #9ca3af;
+  --text-inverse: #ffffff;
+  
+  /* 背景色 */
+  --bg-primary: #ffffff;
+  --bg-secondary: #f9fafb;
+  --bg-tertiary: #f3f4f6;
+  --bg-hover: #e5e7eb;
+  --bg-active: #e0e7ff;
+  
+  /* 侧边栏 */
+  --sidebar-bg: #f9fafb;
+  --sidebar-header-bg: #f3f4f6;
+  --sidebar-hover: #e5e7eb;
+  --sidebar-active: #dbeafe;
+  --sidebar-border: #e5e7eb;
+  
+  /* 内容区 */
+  --content-bg: #ffffff;
+  --content-alt: #f9fafb;
+  
+  /* 代码 */
+  --code-bg: #f3f4f6;
+  --code-header-bg: #e5e7eb;
+  --code-border: #d1d5db;
+  
+  /* 边框 */
+  --border-color: #e5e7eb;
+  --border-strong: #d1d5db;
+  --border-light: #f3f4f6;
+  
+  /* 阴影 */
+  --shadow-xs: 0 1px 1px 0 rgb(0 0 0 / 0.05);
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+  
+  /* 圆角 */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  
+  /* 过渡 */
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.2s ease;
+  --transition-slow: 0.3s ease;
+}
+
+/* 强调色 */
+.accent-blue { color: var(--primary-color); }
+.accent-blue-bg { background: var(--primary-bg); }
+
+.accent-green { color: var(--success-color); }
+.accent-green-bg { background: var(--success-light); }
+
+.accent-yellow { color: var(--warning-color); }
+.accent-yellow-bg { background: var(--warning-light); }
+
+.accent-red { color: var(--danger-color); }
+.accent-red-bg { background: var(--danger-light); }
+
+/* 按钮 */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  text-decoration: none;
+}
+
+.btn-primary {
+  background: var(--primary-color);
+  color: var(--text-inverse);
+}
+
+.btn-primary:hover {
+  background: var(--primary-hover);
+}
+
+.btn-primary:active {
+  background: var(--primary-active);
+}
+
+.btn-secondary {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border-color: var(--border-color);
+}
+
+.btn-secondary:hover {
+  background: var(--bg-hover);
+}
+
+.btn-danger {
+  background: var(--danger-bg);
+  color: var(--danger-color);
+}
+
+.btn-danger:hover {
+  background: var(--danger-color);
+  color: var(--text-inverse);
+}
+
+/* 输入框 */
+.input,
+.textarea {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 14px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  transition: all var(--transition-fast);
+}
+
+.input:focus,
+.textarea:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px var(--primary-light);
+}
+
+.input::placeholder,
+.textarea::placeholder {
+  color: var(--text-tertiary);
+}
+
+/* 卡片 */
+.card {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+/* 分隔线 */
+.divider {
+  height: 1px;
+  background: var(--border-color);
+}
+
+/* 标签 */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  font-size: 12px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+}
+
+.tag-primary {
+  background: var(--primary-bg);
+  color: var(--primary-color);
+}
+
+.tag-success {
+  background: var(--success-light);
+  color: var(--success-color);
+}
+
+.tag-warning {
+  background: var(--warning-light);
+  color: var(--warning-color);
+}
+
+.tag-danger {
+  background: var(--danger-light);
+  color: var(--danger-color);
+}
+
+/* 开关 */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+}
+
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.switch .slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: var(--border-strong);
+  transition: var(--transition-fast);
+  border-radius: var(--radius-full);
+}
+
+.switch .slider:before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 3px;
+  background-color: var(--text-primary);
+  transition: var(--transition-fast);
+  border-radius: 50%;
+}
+
+.switch input:checked + .slider {
+  background-color: var(--primary-color);
+}
+
+.switch input:checked + .slider:before {
+  transform: translateX(20px);
+}
+
+/* 复选框 */
+.checkbox input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  position: relative;
+  transition: var(--transition-fast);
+}
+
+.checkbox input[type="checkbox"]:hover {
+  border-color: var(--primary-color);
+}
+
+.checkbox input[type="checkbox"]:checked {
+  background-color: var(--primary-color);
+  border-color: var(--primary-color);
+}
+
+.checkbox input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 1px;
+  width: 6px;
+  height: 10px;
+  border: solid var(--text-inverse);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+/* 单选框 */
+.radio input[type="radio"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--border-strong);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.radio input[type="radio"]:hover {
+  border-color: var(--primary-color);
+}
+
+.radio input[type="radio"]:checked {
+  border-color: var(--primary-color);
+}
+
+.radio input[type="radio"]:checked::after {
+  content: "";
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background-color: var(--primary-color);
+  border-radius: 50%;
+  margin: 3px;
+}
+
+/* 进度条 */
+.progress {
+  height: 8px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.progress-bar {
+  height: 100%;
+  background: var(--primary-color);
+  border-radius: var(--radius-sm);
+  transition: width var(--transition-normal);
+}
+
+/* 工具提示 */
+.tooltip {
+  position: relative;
+  display: inline-block;
+}
+
+.tooltip .tooltiptext {
+  visibility: hidden;
+  width: 200px;
+  background: var(--text-primary);
+  color: var(--text-inverse);
+  text-align: center;
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  position: absolute;
+  z-index: 1000;
+  bottom: 125%;
+  left: 50%;
+  margin-left: -100px;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+  white-space: nowrap;
+  box-shadow: var(--shadow-md);
+}
+
+.tooltip:hover .tooltiptext {
+  visibility: visible;
+  opacity: 1;
+}
+
+/* 空状态 */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px;
+  text-align: center;
+}
+
+.empty-state-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+  opacity: 0.5;
+}
+
+.empty-state-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.empty-state-desc {
+  font-size: 14px;
+  color: var(--text-secondary);
+  max-width: 300px;
+  line-height: 1.6;
+}
+
+/* 加载状态 */
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid var(--border-strong);
+  border-top-color: var(--primary-color);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* 选中高亮 */
+::selection {
+  background: var(--primary-light);
+  color: var(--text-primary);
+}
+
+/* 代码行高亮 */
+.code-line-highlight {
+  background: var(--primary-bg);
+}
