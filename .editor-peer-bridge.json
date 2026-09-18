@@ -6,7 +6,7 @@
       "instanceName": "Codebuddy 01",
       "port": 47633,
       "workspaceRoots": [
-        "D:/workspace/SimpleMarkdownViewer"
+        "D:/workspace/MaduReader"
       ],
       "supportedProjectTypes": [
         "all"
@@ -19,7 +19,7 @@
       "instanceName": "Cursor 01",
       "port": 47632,
       "workspaceRoots": [
-        "D:/workspace/SimpleMarkdownViewer"
+        "D:/workspace/MaduReader"
       ],
       "supportedProjectTypes": [
         "all"

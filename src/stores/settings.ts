@@ -46,7 +46,7 @@ const DEFAULT_SETTINGS: Settings = {
   proxyServer: ''
 }
 
-const STORAGE_KEY = 'mdreader-settings'
+const STORAGE_KEY = 'madureader-settings'
 
 function isTauriRuntime(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window

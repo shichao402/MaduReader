@@ -1,8 +1,8 @@
-# MDReader 需求文档
+# MaduReader 需求文档
 
 ## 项目概述
 
-MDReader 是一款基于 Tauri 2.x 的跨平台 Markdown 阅读器，采用极简现代风格设计，支持丰富的文档格式化、图表渲染、代码高亮等功能。
+MaduReader 是一款基于 Tauri 2.x 的跨平台 Markdown 阅读器，采用极简现代风格设计，支持丰富的文档格式化、图表渲染、代码高亮等功能。
 
 ## 界面设计
 
@@ -304,8 +304,8 @@ MDReader 是一款基于 Tauri 2.x 的跨平台 Markdown 阅读器，采用极�
 
 - **Windows**（优先）
   - 单文件可执行程序（.exe）
-  - 配置文件存储：`%APPDATA%\MDReader\config.json`
-  - 用户数据目录：`%APPDATA%\MDReader\`
+  - 配置文件存储：`%APPDATA%\MaduReader\config.json`
+  - 用户数据目录：`%APPDATA%\MaduReader\`
   - 支持静默安装/卸载
 
 - **macOS**（后续支持）
@@ -336,7 +336,7 @@ MDReader 是一款基于 Tauri 2.x 的跨平台 Markdown 阅读器，采用极�
 ### 命令行支持
 
 ```
-MDReader.exe [options] <path>
+MaduReader.exe [options] <path>
 ```
 
 **参数说明**
@@ -353,19 +353,19 @@ MDReader.exe [options] <path>
 
 ```bash
 # 打开单个文件（页签模式，默认左侧栏）
-MDReader.exe README.md
+MaduReader.exe README.md
 
 # 独立窗口打开
-MDReader.exe -w README.md
+MaduReader.exe -w README.md
 
 # 页签模式，侧边栏在右侧
-MDReader.exe -t --side right README.md
+MaduReader.exe -t --side right README.md
 
 # 打开目录
-MDReader.exe ./docs
+MaduReader.exe ./docs
 
 # 打开目录，独立窗口
-MDReader.exe -w ./docs
+MaduReader.exe -w ./docs
 ```
 
 ### 目录打开

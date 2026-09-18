@@ -11,7 +11,7 @@ fn get_args() -> Vec<String> {
 fn app_data_dir() -> Result<String, String> {
     dirs::data_dir()
         .map(|dir| {
-            let path = dir.join("mdreader");
+            let path = dir.join("madureader");
             let mut s = path.to_string_lossy().into_owned();
             if !s.ends_with(std::path::MAIN_SEPARATOR) {
                 s.push(std::path::MAIN_SEPARATOR);

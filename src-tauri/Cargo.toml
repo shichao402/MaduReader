@@ -1,27 +1,27 @@
 [package]
-name = "mdreader"
+name = "madureader"
 version = "0.1.0"
-description = "A minimalistic Markdown reader built with Tauri 2.x and Vue 3"
+description = "MaduReader (Ma读) - A minimalistic Markdown reader built with Tauri 2.x and React 19"
 authors = ["firoyang"]
 edition = "2021"
 
 [lib]
-name = "mdreader_lib"
+name = "madureader_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
-tauri-plugin-shell = "2"
-tauri-plugin-dialog = "2"
-tauri-plugin-fs = "2"
-tauri-plugin-opener = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+tauri = { version = "2.9", features = [] }
+tauri-plugin-shell = "2.3"
+tauri-plugin-dialog = "2.4"
+tauri-plugin-fs = "2.4"
+tauri-plugin-opener = "2.5"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 tokio = { version = "1", features = ["full"] }
-dirs = "5"
+dirs = "6"
 
 [profile.release]
 opt-level = 3

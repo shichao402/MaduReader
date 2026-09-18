@@ -1,4 +1,4 @@
-# MDReader E2E：Agent 自我验证协议
+# MaduReader E2E：Agent 自我验证协议
 
 本项目的 e2e 测试不使用 Playwright 等脚本测试框架，而是由 AI Agent 在每次 UI 改动后亲自执行闭环验证：
 

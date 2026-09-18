@@ -20,7 +20,7 @@ export interface MarkdownOptions {
   highlight?: (str: string, lang: string) => string
 }
 
-let mdInstance: MarkdownIt | null = null
+let mdInstance: InstanceType<typeof MarkdownIt> | null = null
 
 function createMarkdownIt() {
   const md = new MarkdownIt({
@@ -72,7 +72,7 @@ function createMarkdownIt() {
   return md
 }
 
-export function getMarkdownInstance(): MarkdownIt {
+export function getMarkdownInstance(): InstanceType<typeof MarkdownIt> {
   if (!mdInstance) {
     mdInstance = createMarkdownIt()
   }
@@ -87,7 +87,7 @@ export function renderMarkdown(source: string): string {
   html = processKatex(html)
   
   // 添加图片懒加载
-  html = html.replace(/<img([^>]*)>/gi, (_, attrs) => {
+  html = html.replace(/<img([^>]*)>/gi, (_: string, attrs: string) => {
     return `<img loading="lazy"${attrs}>`
   })
   
