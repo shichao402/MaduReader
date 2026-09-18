@@ -14,7 +14,8 @@ export function sanitizeHtml(html: string): string {
     'details', 'summary',
     'figure', 'figcaption',
     'mark', 'time',
-    'svg', 'path', 'circle', 'rect', 'ellipse', 'line', 'polyline', 'polygon', 'g', 'use', 'defs', 'symbol', 'marker', 'stop', 'linearGradient', 'radialGradient'
+    'svg', 'path', 'circle', 'rect', 'ellipse', 'line', 'polyline', 'polygon', 'g', 'use', 'defs', 'symbol', 'marker', 'stop', 'linearGradient', 'radialGradient',
+    'math', 'semantics', 'annotation', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub', 'msubsup', 'mfrac', 'msqrt', 'mroot', 'mtable', 'mtr', 'mtd', 'mspace', 'mtext', 'mpadded', 'mstyle', 'mover', 'munder', 'munderover', 'mmultiscripts', 'mprescripts', 'none', 'menclose', 'merror', 'mphantom'
   ]
 
   const allowedAttrs = [
@@ -27,7 +28,8 @@ export function sanitizeHtml(html: string): string {
     'fill', 'stroke', 'stroke-width',
     'data-code', 'data-language', 'language',
     'xlink:href', 'data-copy',
-    'loading'
+    'loading',
+    'encoding', 'mathvariant', 'displaystyle', 'stretchy', 'fence', 'separator', 'lspace', 'rspace', 'width', 'height', 'depth', 'linethickness', 'columnalign', 'rowalign', 'columnlines', 'rowlines', 'frame', 'open', 'close', 'form'
   ]
 
   DOMPurify.addHook('beforeSanitizeAttributes', (node: Element) => {

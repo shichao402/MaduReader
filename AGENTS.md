@@ -1,4 +1,4 @@
-# MDReader 开发约定（面向 AI Agent）
+# MaduReader 开发约定（面向 AI Agent）
 
 ## 项目
 

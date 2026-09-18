@@ -8,7 +8,12 @@ export function processKatex(html: string): string {
   // 处理块级公式 $$...$$
   html = html.replace(/\$\$([\s\S]+?)\$\$/g, (_match, code: string) => {
     try {
-      const rendered = katex.renderToString(code.trim(), {
+      const cleaned = code
+        .replace(/<br\s*\/?>/gi, ' ')
+        .replace(/<[^>]+>/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+      const rendered = katex.renderToString(cleaned, {
         displayMode: true,
         throwOnError: false,
         trust: true
@@ -23,7 +28,8 @@ export function processKatex(html: string): string {
   // 处理行内公式 $...$ (需要更精确的匹配，避免误匹配 URL 等)
   html = html.replace(/(?<!\$)\$([^\$\n]+?)\$(?!\$)/g, (_match, code: string) => {
     try {
-      const rendered = katex.renderToString(code.trim(), {
+      const cleaned = code.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, '').trim()
+      const rendered = katex.renderToString(cleaned, {
         displayMode: false,
         throwOnError: false,
         trust: true
