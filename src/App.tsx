@@ -210,6 +210,76 @@ export default function App() {
     }
   }, [])
 
+  // 拖拽打开：WebView2 新内核已移除 File.path，必须用 Tauri 的拖放事件拿真实路径
+  useEffect(() => {
+    if (!isTauri) return
+    let unlisten: (() => void) | undefined
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { getCurrentWebview } = await import('@tauri-apps/api/webview')
+        const un = await getCurrentWebview().onDragDropEvent((event) => {
+          if (event.payload.type === 'drop') {
+            const paths = event.payload.paths
+            if (paths.length > 0) {
+              void handleDroppedPaths(paths)
+            }
+          }
+        })
+        if (cancelled) {
+          un()
+        } else {
+          unlisten = un
+        }
+      } catch (e) {
+        console.error('[MaduReader] Failed to listen drag-drop events:', e)
+      }
+    })()
+    return () => {
+      cancelled = true
+      unlisten?.()
+    }
+  }, [])
+
+  async function handleDroppedPaths(paths: string[]) {
+    const tabStore = getTabStore()
+    const fs = await import('@tauri-apps/plugin-fs')
+    // 目录：设为工作目录并构建文件树，打开第一个 md
+    let isDir = false
+    try {
+      await fs.readDir(paths[0])
+      isDir = true
+    } catch {
+      isDir = false
+    }
+    if (isDir) {
+      tabStore.setWorkingDirectory(paths[0])
+      const files = await fs.readDir(paths[0])
+      const mdFiles = files.filter((f: { name: string }) =>
+        f.name.toLowerCase().endsWith('.md'),
+      )
+      if (mdFiles.length > 0) {
+        const readme = mdFiles.find(
+          (f: { name: string }) => f.name.toLowerCase() === 'readme.md',
+        )
+        const target = readme || mdFiles[0]
+        const sep = paths[0].includes('\\') ? '\\' : '/'
+        const fullPath = paths[0].endsWith(sep)
+          ? `${paths[0]}${target.name}`
+          : `${paths[0]}${sep}${target.name}`
+        await tabStore.openFile(fullPath)
+      }
+      return
+    }
+    // 文件：打开第一个 .md，同时把它所在目录设为工作目录
+    const mdPath = paths.find((p) => p.toLowerCase().endsWith('.md')) || paths[0]
+    await tabStore.openFile(mdPath)
+    const parentDir = mdPath.replace(/[\\/][^\\/]+$/, '')
+    if (parentDir && parentDir !== mdPath) {
+      tabStore.setWorkingDirectory(parentDir)
+    }
+  }
+
   function toggleSidebar() {
     setSidebarCollapsed((v) => {
       settingsStore.update({ sidebarCollapsed: !v }, { save: false })

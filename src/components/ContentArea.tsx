@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
-import { FolderOpen, ZoomIn, ZoomOut, Search, Download, Presentation, Sun, Moon, Settings, BookOpen, Command } from 'lucide-react'
+import { Folder, FolderOpen, ZoomIn, ZoomOut, Search, Download, Presentation, Sun, Moon, Settings, BookOpen, Command } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { getTabStore, getSettingsStore, useStores } from '../hooks/useStores'
 import { renderMarkdown, initCodeCopy } from '../composables/useMarkdown'
@@ -241,26 +241,9 @@ export default function ContentArea({
     if (!hasSlides) setSlideMode(false)
   }, [hasSlides])
 
-  // 初始化代码复制 + 拖拽
+  // 初始化代码复制（拖拽由 App.tsx 通过 Tauri onDragDropEvent 全局处理）
   useEffect(() => {
     initCodeCopy()
-    const container = containerRef.current
-    if (!container) return
-    const handleDrop = async (e: DragEvent) => {
-      e.preventDefault()
-      const file = e.dataTransfer?.files?.[0]
-      const filePath = (file as File & { path?: string })?.path
-      if (filePath) {
-        getTabStore().openFile(filePath)
-      }
-    }
-    const handleDragOver = (e: DragEvent) => e.preventDefault()
-    container.addEventListener('drop', handleDrop)
-    container.addEventListener('dragover', handleDragOver)
-    return () => {
-      container.removeEventListener('drop', handleDrop)
-      container.removeEventListener('dragover', handleDragOver)
-    }
   }, [])
 
   async function openFile() {
@@ -290,6 +273,36 @@ export default function ContentArea({
     }
   }
 
+  async function openDirectory() {
+    if (!isTauri) return
+    const tabStore = getTabStore()
+    const dialog = await import('@tauri-apps/plugin-dialog')
+    const path = await dialog.open({ directory: true, multiple: false })
+    if (!path) return
+    const dir = path as string
+    tabStore.setWorkingDirectory(dir)
+    try {
+      const fs = await import('@tauri-apps/plugin-fs')
+      const files = await fs.readDir(dir)
+      const mdFiles = files.filter((f: { name: string }) =>
+        f.name.toLowerCase().endsWith('.md'),
+      )
+      if (mdFiles.length > 0) {
+        const readme = mdFiles.find(
+          (f: { name: string }) => f.name.toLowerCase() === 'readme.md',
+        )
+        const target = readme || mdFiles[0]
+        const sep = dir.includes('\\') ? '\\' : '/'
+        const fullPath = dir.endsWith(sep)
+          ? `${dir}${target.name}`
+          : `${dir}${sep}${target.name}`
+        await tabStore.openFile(fullPath)
+      }
+    } catch (e) {
+      console.error('[ContentArea] Failed to open directory:', e)
+    }
+  }
+
   function toggleSlideMode() {
     if (!hasSlides) return
     setSlideMode((v) => !v)
@@ -313,6 +326,10 @@ export default function ContentArea({
         <button className={toolBtn} onClick={openFile} title="打开文件 (Ctrl+O)" data-kbd="Ctrl O">
           <FolderOpen size={15} />
           打开
+        </button>
+        <button className={toolBtn} onClick={openDirectory} title="打开目录">
+          <Folder size={15} />
+          目录
         </button>
         <div className="w-px h-5 bg-[color:var(--color-border-base)] mx-1" />
         <button
@@ -383,15 +400,24 @@ export default function ContentArea({
               支持代码高亮、公式、流程图与幻灯片模式
             </p>
           </div>
-          <button
-            className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[color:var(--color-accent)] hover:bg-[color:var(--color-accent-hover)] text-white text-sm font-medium shadow-md transition-colors"
-            onClick={openFile}
-          >
-            <FolderOpen size={16} />
-            打开文件
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[color:var(--color-accent)] hover:bg-[color:var(--color-accent-hover)] text-white text-sm font-medium shadow-md transition-colors"
+              onClick={openFile}
+            >
+              <FolderOpen size={16} />
+              打开文件
+            </button>
+            <button
+              className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[color:var(--color-bg-secondary)] hover:bg-[color:var(--color-bg-hover)] border border-[color:var(--color-border-base)] text-[color:var(--color-text-primary)] text-sm font-medium transition-colors"
+              onClick={openDirectory}
+            >
+              <Folder size={16} />
+              打开目录
+            </button>
+          </div>
           <p className="text-xs text-[color:var(--color-text-tertiary)]">
-            也可以将 .md 文件拖拽到窗口
+            也可以将 .md 文件或整个文件夹拖拽到窗口
           </p>
         </div>
       ) : (

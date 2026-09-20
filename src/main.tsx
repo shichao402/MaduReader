@@ -19,6 +19,25 @@ window.addEventListener('unhandledrejection', (e) => {
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 console.log('[MaduReader] isTauri:', isTauri)
 
+// 接入 tauri-plugin-log：日志落盘（LogDir/madureader.log），前端致命错误也写入
+if (isTauri) {
+  void (async () => {
+    try {
+      const log = await import('@tauri-apps/plugin-log')
+      await log.attachConsole()
+      await log.info('[MaduReader] log plugin attached')
+      window.addEventListener('error', (e) => {
+        void log.error(`[window.onerror] ${e.message} @ ${e.filename}:${e.lineno}`)
+      })
+      window.addEventListener('unhandledrejection', (e) => {
+        void log.error(`[unhandledrejection] ${String(e.reason)}`)
+      })
+    } catch (e) {
+      console.error('[MaduReader] log plugin init failed:', e)
+    }
+  })()
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />

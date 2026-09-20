@@ -151,8 +151,8 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 bg-black/50 z-[9999] animate-fade-in" />
-        <Dialog.Content className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90%] max-w-[600px] max-h-[80vh] overflow-y-auto bg-[color:var(--color-bg-primary)] rounded-lg shadow-xl border border-[color:var(--color-border-base)] animate-fade-in">
+        <Dialog.Overlay className="fixed inset-0 bg-black/50 z-[2000] animate-fade-in" />
+        <Dialog.Content className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[2001] w-[90%] max-w-[600px] max-h-[80vh] overflow-y-auto bg-[color:var(--color-bg-primary)] rounded-lg shadow-xl border border-[color:var(--color-border-base)] animate-fade-in">
           <div className="flex items-center justify-between px-5 py-4 border-b border-[color:var(--color-border-base)] bg-[color:var(--color-sidebar-header)]">
             <Dialog.Title className="text-lg font-semibold text-[color:var(--color-text-primary)]">
               设置
