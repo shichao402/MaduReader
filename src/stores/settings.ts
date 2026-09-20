@@ -24,6 +24,7 @@ export interface Settings {
   plantUmlServer: string
   proxyEnabled: boolean
   proxyServer: string
+  windowMaterial: 'off' | 'mica' | 'acrylic'
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -43,7 +44,8 @@ const DEFAULT_SETTINGS: Settings = {
   },
   plantUmlServer: 'https://www.plantuml.com/plantuml',
   proxyEnabled: false,
-  proxyServer: ''
+  proxyServer: '',
+  windowMaterial: 'mica'
 }
 
 const STORAGE_KEY = 'madureader-settings'
@@ -112,6 +114,7 @@ export const useSettingsStore = defineStore('settings', () => {
       isLoaded.value = true
       console.log('[Settings] Applying theme, isDark:', isDark.value)
       applyTheme()
+      void applyWindowMaterial()
       console.log('[Settings] loadSettings completed successfully')
     } catch (e) {
       console.error('[Settings] Failed to load settings:', e)
@@ -145,15 +148,34 @@ export const useSettingsStore = defineStore('settings', () => {
     console.log('[Settings] Theme classes applied:', root.className)
   }
 
+  async function applyWindowMaterial() {
+    if (!isTauriRuntime()) return
+    try {
+      const { getCurrentWindow, Effect } = await import('@tauri-apps/api/window')
+      const win = getCurrentWindow()
+      await win.clearEffects()
+      const material = settings.value.windowMaterial
+      if (material === 'mica') {
+        await win.setEffects({ effects: [Effect.Tabbed] })
+      } else if (material === 'acrylic') {
+        await win.setEffects({ effects: [Effect.Acrylic] })
+      }
+    } catch (e) {
+      console.error('[Settings] applyWindowMaterial failed:', e)
+    }
+  }
+
   function toggleTheme() {
     settings.value.theme = settings.value.theme === 'light' ? 'dark' : 'light'
     applyTheme()
+    void applyWindowMaterial()
     saveSettings()
   }
 
   function setTheme(theme: 'light' | 'dark' | 'system') {
     settings.value.theme = theme
     applyTheme()
+    void applyWindowMaterial()
     saveSettings()
   }
 
@@ -188,8 +210,14 @@ export const useSettingsStore = defineStore('settings', () => {
     loadSettings,
     saveSettings,
     applyTheme,
+    applyWindowMaterial,
     toggleTheme,
     setTheme,
+    setWindowMaterial(material: 'off' | 'mica' | 'acrylic') {
+      settings.value.windowMaterial = material
+      void applyWindowMaterial()
+      saveSettings()
+    },
     setZoom,
     increaseZoom,
     decreaseZoom,

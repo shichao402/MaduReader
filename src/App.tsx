@@ -3,9 +3,12 @@ import { getSettingsStore, getTabStore, useStores } from './hooks/useStores'
 import Sidebar from './components/Sidebar'
 import SidebarIconBar from './components/SidebarIconBar'
 import ContentArea from './components/ContentArea'
+import CommandPalette from './components/CommandPalette'
 import SettingsDialog from './components/SettingsDialog'
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+
+if (isTauri) document.documentElement.classList.add('tauri')
 
 const demoFiles = [
   {
@@ -98,6 +101,7 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [sidebarPosition, setSidebarPosition] = useState<'left' | 'right'>('left')
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
 
   // 初始化
   useEffect(() => {
@@ -189,8 +193,26 @@ export default function App() {
     })
   }
 
+  useEffect(() => {
+    function handleKeydown(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setPaletteOpen((v) => !v)
+      }
+    }
+    const open = () => setPaletteOpen(true)
+    document.addEventListener('keydown', handleKeydown)
+    document.addEventListener('open-command-palette', open)
+    window.addEventListener('open-command-palette', open)
+    return () => {
+      document.removeEventListener('keydown', handleKeydown)
+      document.removeEventListener('open-command-palette', open)
+      window.removeEventListener('open-command-palette', open)
+    }
+  }, [])
+
   return (
-    <div className="flex w-screen h-screen overflow-hidden">
+    <div className="flex w-screen h-screen overflow-hidden app-root">
       {sidebarCollapsed ? (
         <SidebarIconBar
           sidebarPosition={sidebarPosition}
@@ -237,6 +259,11 @@ export default function App() {
       </div>
 
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <CommandPalette
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        onToggleSidebar={toggleSidebar}
+      />
     </div>
   )
 }

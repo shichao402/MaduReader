@@ -1,0 +1,504 @@
+/* MaduReader 设计系统基座 v2
+   核心思路: 纸张感暖灰阶 + 单一琥珀 accent + 4px 网格 + 克制的圆角
+   借鉴: Linear 灰阶纪律 / Typora 阅读排版 / Raycast 分层阴影 / Calm Design
+   加载顺序: 必须在 main.css 之后加载 (本文件为覆盖层, 旧组件零改动生效)
+   使用方式: 在 index.html 中于 main.css 之后引入本文件;
+   迁移完成后可合并回 main.css 并删除本文件。
+*/
+
+@import "tailwindcss";
+@import "tw-animate-css";
+@plugin "@tailwindcss/typography";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* ===== 1. 色板: 书卷气琥珀 accent + 微暖 stone 灰阶 ===== */
+  --color-accent: #d97706;          /* amber-600, 书签色 */
+  --color-accent-hover: #b45309;    /* amber-700 */
+  --color-accent-weak: #f59e0b;     /* 暗色下 accent */
+  --color-accent-soft: #fef3c7;     /* 亮色选中背景 */
+  --color-accent-soft-dark: #451a03; /* 暗色选中背景 */
+
+  /* 文本 — 微暖灰阶 */
+  --color-text-primary: #1c1917;
+  --color-text-secondary: #78716c;
+  --color-text-tertiary: #a8a29e;
+  --color-text-inverse: #ffffff;
+
+  /* 背景层 — 纸感三级背景 */
+  --color-bg-primary: #fafaf9;
+  --color-bg-secondary: #f5f5f4;
+  --color-bg-tertiary: #e7e5e4;
+  --color-bg-hover: #d6d3d1;
+
+  /* 侧栏 — 比内容深半级, 形成"纸放在桌上"的层次 */
+  --color-sidebar: #f5f5f4;
+  --color-sidebar-header: #ede9e0;
+  --color-sidebar-hover: #e0ded8;
+  --color-sidebar-active: #f2ede1;
+
+  --color-content: #fafaf9;
+  --color-toolbar: #f5f5f4;
+
+  /* 代码块 */
+  --color-code: #f5f5f4;
+  --color-code-header: #edeae7;
+  --color-code-border: #d6d3d1;
+
+  /* 状态色 — 低饱和以匹配暖灰阶 */
+  --color-success: #15803d;
+  --color-success-bg: #dcfce7;
+  --color-warning: #b45309;
+  --color-warning-bg: #fef3c7;
+  --color-danger: #b91c1c;
+  --color-danger-bg: #fee2e2;
+
+  /* 查找/引用/表格 — 引用与表头带一点书卷暖色 */
+  --color-find-box: #ffffff;
+  --color-blockquote-bg: #faf6ec;
+  --color-table-header: #f5f0e6;
+
+  /* 边框 */
+  --color-border-base: #e7e5e4;
+  --color-border-strong: #d6d3d1;
+
+  /* ===== 2. 圆角: 克制, Linear 式 ===== */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+
+  /* ===== 3. 阴影: Raycast 式分层 ===== */
+  --shadow-sm: 0 1px 2px rgb(28 25 23 / 0.05);
+  --shadow-md: 0 2px 8px rgb(28 25 23 / 0.08), 0 0 0 1px rgb(28 25 23 / 0.04);
+  --shadow-lg: 0 8px 24px rgb(28 25 23 / 0.12), 0 0 0 1px rgb(28 25 23 / 0.05);
+}
+
+/* 旧变量兼容层 (亮色) — 老组件继续用 --color-primary 等旧名, 值指向新色板 */
+@theme {
+  --color-primary: #d97706;
+  --color-primary-hover: #b45309;
+  --color-primary-active: #92400e;
+  --color-primary-light: #fde68a;
+  --color-primary-bg: #fef3c7;
+}
+
+/* ===== 暗色主题 — 深炭底 + 琥珀 accent ===== */
+.dark {
+  --color-accent: #f59e0b;
+  --color-accent-hover: #fbbf24;
+  --color-accent-weak: #fbbf24;
+  --color-accent-soft: #451a03;
+  --color-accent-soft-dark: #451a03;
+
+  --color-text-primary: #e7e5e4;
+  --color-text-secondary: #a8a29e;
+  --color-text-tertiary: #78716c;
+  --color-text-inverse: #1c1917;
+
+  --color-bg-primary: #1c1917;
+  --color-bg-secondary: #292524;
+  --color-bg-tertiary: #292524;
+  --color-bg-hover: #44403c;
+
+  --color-sidebar: #201d1b;
+  --color-sidebar-header: #292524;
+  --color-sidebar-hover: #3a3634;
+  --color-sidebar-active: #3d2f1a;
+
+  --color-content: #1c1917;
+  --color-toolbar: #201d1b;
+
+  --color-code: #292524;
+  --color-code-header: #33302d;
+  --color-code-border: #44403c;
+
+  --color-success: #4ade80;
+  --color-success-bg: #14532d;
+  --color-warning: #fbbf24;
+  --color-warning-bg: #451a03;
+  --color-danger: #f87171;
+  --color-danger-bg: #450a0a;
+
+  --color-find-box: #292524;
+  --color-blockquote-bg: #2a2620;
+  --color-table-header: #292524;
+
+  --color-border-base: #38332f;
+  --color-border-strong: #44403c;
+
+  /* 旧变量兼容层 (暗色) */
+  --color-primary: #f59e0b;
+  --color-primary-hover: #fbbf24;
+  --color-primary-active: #fcd34d;
+  --color-primary-light: #78350f;
+  --color-primary-bg: #451a03;
+}
+
+/* ===== 基础 ===== */
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  color: var(--color-text-primary);
+  background: var(--color-content);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 滚动条 — 细一档, 悬浮才显色 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-tertiary);
+}
+
+/* 选中文本 — 琥珀纸感 */
+::selection {
+  background: #fde68a;
+  color: #1c1917;
+}
+.dark ::selection {
+  background: #78350f;
+  color: #e7e5e4;
+}
+
+/* ===== 阅读区排版 — Typora 式呼吸感 ===== */
+.markdown-content {
+  line-height: 1.85;
+  letter-spacing: 0.01em;
+}
+.markdown-content h1 {
+  font-size: 2em;
+  margin: 1.2em 0 0.6em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--color-border-base);
+}
+.markdown-content h2 {
+  font-size: 1.55em;
+  margin: 1.1em 0 0.5em;
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid var(--color-border-base);
+}
+.markdown-content h3 {
+  font-size: 1.28em;
+  margin: 1em 0 0.5em;
+}
+.markdown-content h4,
+.markdown-content h5,
+.markdown-content h6 {
+  margin: 0.8em 0 0.4em;
+}
+.markdown-content p {
+  margin: 1em 0;
+}
+.markdown-content code {
+  background: var(--color-code);
+  padding: 0.2em 0.4em;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+}
+.markdown-content pre {
+  background: var(--color-code);
+  padding: 1em;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 1em 0;
+}
+.markdown-content pre code {
+  background: none;
+  padding: 0;
+}
+.markdown-content ul,
+.markdown-content ol {
+  margin: 1em 0;
+  padding-left: 1.6em;
+}
+.markdown-content li {
+  margin: 0.4em 0;
+}
+.markdown-content blockquote {
+  border-left: 3px solid var(--color-accent);
+  padding: 0.6em 1.1em;
+  margin: 1.2em 0;
+  color: var(--color-text-secondary);
+  background: var(--color-blockquote-bg);
+  border-radius: 0 8px 8px 0;
+}
+.markdown-content table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1.2em 0;
+}
+.markdown-content th,
+.markdown-content td {
+  border: 1px solid var(--color-border-base);
+  padding: 0.55em 1em;
+  text-align: left;
+}
+.markdown-content th {
+  background: var(--color-table-header);
+  font-weight: 600;
+}
+.markdown-content img {
+  max-width: 100%;
+  border-radius: 8px;
+  margin: 1em 0;
+}
+.markdown-content a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+.markdown-content a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.markdown-content hr {
+  border: none;
+  border-top: 1px solid var(--color-border-base);
+  margin: 2em 0;
+}
+.markdown-content .hljs {
+  background: var(--color-code);
+}
+.markdown-content .code-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5em 1em;
+  background: var(--color-code-header);
+  border-radius: 8px 8px 0 0;
+  border-bottom: 1px solid var(--color-border-base);
+}
+.markdown-content .language-label {
+  font-size: 0.8em;
+  color: var(--color-text-tertiary);
+  letter-spacing: 0.04em;
+}
+.markdown-content .copy-btn {
+  background: transparent;
+  border: 1px solid var(--color-border-base);
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8em;
+  color: var(--color-text-secondary);
+  transition: opacity 0.12s;
+}
+.markdown-content .copy-btn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-border-strong);
+}
+.markdown-content .mermaid {
+  margin: 1em 0;
+}
+.markdown-content .mermaid-error {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  padding: 1em;
+  border-radius: 8px;
+  text-align: center;
+}
+.markdown-content .plantuml-diagram {
+  margin: 1em 0;
+  text-align: center;
+}
+.markdown-content .search-highlight {
+  background: #fde68a;
+  color: #1c1917;
+  padding: 2px;
+  border-radius: 3px;
+}
+.markdown-content .search-highlight.active {
+  background: #f59e0b;
+  color: #ffffff;
+}
+.dark .markdown-content .search-highlight {
+  background: #78350f;
+  color: #fef3c7;
+}
+.dark .markdown-content .search-highlight.active {
+  background: #f59e0b;
+  color: #1c1917;
+}
+
+/* ===== 代码高亮 — 沿用 GitHub 配色, 背景随主题 ===== */
+.hljs {
+  background: var(--color-code) !important;
+  color: #24292e !important;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-built_in,
+.hljs-name {
+  color: #d73a49 !important;
+}
+.hljs-string {
+  color: #0366d6 !important;
+}
+.hljs-number,
+.hljs-literal,
+.hljs-attribute,
+.hljs-attr {
+  color: #005cc5 !important;
+}
+.hljs-comment {
+  color: #6a737d !important;
+  font-style: italic !important;
+}
+.hljs-type,
+.hljs-class {
+  color: #6f42c1 !important;
+}
+.hljs-function,
+.hljs-title,
+.hljs-section {
+  color: #6f42c1 !important;
+}
+.hljs-variable,
+.hljs-template-variable,
+.hljs-symbol,
+.hljs-bullet {
+  color: #e36209 !important;
+}
+.hljs-meta {
+  color: #735c0f !important;
+}
+
+.dark .hljs {
+  background: var(--color-code) !important;
+  color: #c9d1d9 !important;
+}
+.dark .hljs-keyword,
+.dark .hljs-selector-tag,
+.dark .hljs-built_in,
+.dark .hljs-name {
+  color: #ff7b72 !important;
+}
+.dark .hljs-string {
+  color: #a5d6ff !important;
+}
+.dark .hljs-number,
+.dark .hljs-literal,
+.dark .hljs-attribute,
+.dark .hljs-attr {
+  color: #79c0ff !important;
+}
+.dark .hljs-comment {
+  color: #8b949e !important;
+  font-style: italic !important;
+}
+.dark .hljs-type,
+.dark .hljs-class {
+  color: #d2a8ff !important;
+}
+.dark .hljs-function,
+.dark .hljs-title,
+.dark .hljs-section {
+  color: #d2a8ff !important;
+}
+.dark .hljs-variable,
+.dark .hljs-template-variable,
+.dark .hljs-symbol,
+.dark .hljs-bullet {
+  color: #ffa657 !important;
+}
+.dark .hljs-meta {
+  color: #c9d1d9 !important;
+}
+
+/* ===== KaTeX ===== */
+.katex-block {
+  margin: 1em 0;
+  padding: 16px;
+  border-radius: 8px;
+  background: var(--color-content);
+  overflow-x: auto;
+  text-align: center;
+}
+.katex-block .katex {
+  font-size: 1.2em;
+  color: var(--color-text-primary);
+}
+.katex {
+  font-size: 1em;
+  color: var(--color-text-primary);
+  background: var(--color-code);
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin: 0 2px;
+}
+.katex-error {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+/* ===== Motion — 只动 transform/opacity, 120ms 纪律 ===== */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-fade-in {
+  animation: fade-in 0.18s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in {
+    animation: none;
+  }
+}
+
+/* ===== kbd 徽章 — 原生级快捷键提示（hover 显现，不添噪音）===== */
+[data-kbd] {
+  position: relative;
+}
+[data-kbd]::after {
+  content: attr(data-kbd);
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  line-height: 12px;
+  letter-spacing: 0.03em;
+  color: var(--color-text-tertiary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-base);
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 0.12s ease-out, transform 0.12s ease-out;
+  pointer-events: none;
+}
+[data-kbd]:hover::after {
+  opacity: 1;
+  transform: translateY(0);
+}

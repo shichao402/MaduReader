@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
-import { FolderOpen, ZoomIn, ZoomOut, Search, Download, Presentation, Sun, Moon, Settings } from 'lucide-react'
+import { FolderOpen, ZoomIn, ZoomOut, Search, Download, Presentation, Sun, Moon, Settings, BookOpen, Command } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { getTabStore, getSettingsStore, useStores } from '../hooks/useStores'
 import { renderMarkdown, initCodeCopy } from '../composables/useMarkdown'
@@ -51,6 +51,7 @@ export default function ContentArea({
   const [slideMode, setSlideMode] = useState(false)
   const [currentSlide, setCurrentSlide] = useState(0)
   const [exportOpen, setExportOpen] = useState(false)
+  const [isEmpty, setIsEmpty] = useState(true)
 
   const zoom = (snapshot.currentZoom ?? 100) / 100
   const slides = useMemo(
@@ -79,12 +80,12 @@ export default function ContentArea({
     async function render() {
       const tabStore = getTabStore()
       const settingsStore = getSettingsStore()
-      if (!tabStore.activeTab) {
-        setRenderedContent(
-          '<p style="color: var(--color-text-secondary);">打开一个 Markdown 文件开始阅读</p>',
-        )
+      if (!tabStore.activeTab || !tabStore.activeContent) {
+        setIsEmpty(true)
+        setRenderedContent('')
         return
       }
+      setIsEmpty(false)
       try {
         const source =
           slideMode && hasSlides
@@ -170,6 +171,36 @@ export default function ContentArea({
     setCurrentSlide(0)
   }, [snapshot.activeTabId])
 
+  // 命令面板事件总线：open file / find / export / slideshow / scroll-to-heading
+  useEffect(() => {
+    const onOpenFile = () => void openFile()
+    const onFind = () => findText()
+    const onExport = () => setExportOpen(true)
+    const onSlideshow = () => toggleSlideMode()
+    const onScrollHeading = (e: Event) => {
+      const detail = (e as CustomEvent<{ index: number; text?: string }>).detail
+      if (!contentRef.current || !detail) return
+      const headings = Array.from(
+        contentRef.current.querySelectorAll('h1, h2, h3, h4, h5, h6'),
+      )
+      const target =
+        headings.find((h) => h.textContent === detail.text) ?? headings[detail.index]
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+    document.addEventListener('trigger-open-file', onOpenFile)
+    document.addEventListener('trigger-find', onFind)
+    document.addEventListener('trigger-export', onExport)
+    document.addEventListener('trigger-slideshow', onSlideshow)
+    document.addEventListener('scroll-to-heading', onScrollHeading)
+    return () => {
+      document.removeEventListener('trigger-open-file', onOpenFile)
+      document.removeEventListener('trigger-find', onFind)
+      document.removeEventListener('trigger-export', onExport)
+      document.removeEventListener('trigger-slideshow', onSlideshow)
+      document.removeEventListener('scroll-to-heading', onScrollHeading)
+    }
+  }, [findText])
+
   useEffect(() => {
     if (!hasSlides) setSlideMode(false)
   }, [hasSlides])
@@ -235,20 +266,112 @@ export default function ContentArea({
   return (
     <div
       ref={containerRef}
-      className="flex-1 flex flex-col overflow-hidden bg-[color:var(--color-content)] relative"
+      className="surface-content flex-1 flex flex-col overflow-hidden bg-[color:var(--color-content)] relative"
     >
-      <div className="flex-1 overflow-auto p-8 px-12">
-        <div
-          ref={contentRef}
-          className={cn(
-            'markdown-content max-w-[800px] mx-auto animate-fade-in',
-            slideMode &&
-              'min-h-[calc(100vh-180px)] p-12 border border-[color:var(--color-border-base)] rounded-2xl shadow-lg bg-[color:var(--color-content)]',
-          )}
-          style={{ fontSize: `${snapshot.settings?.fontSize ?? 16}px` }}
-          dangerouslySetInnerHTML={{ __html: renderedContent }}
-        />
+      {/* 工具栏（顶部） */}
+      <div className="surface-toolbar flex gap-1 items-center px-3 py-1.5 bg-[color:var(--color-toolbar)] border-b border-[color:var(--color-border-base)]">
+        <button className={toolBtn} onClick={() => window.dispatchEvent(new Event('open-command-palette'))} title="命令面板 (Ctrl+K)" data-kbd="Ctrl K">
+          <Command size={15} />
+        </button>
+        <div className="w-px h-5 bg-[color:var(--color-border-base)] mx-1" />
+        <button className={toolBtn} onClick={openFile} title="打开文件 (Ctrl+O)" data-kbd="Ctrl O">
+          <FolderOpen size={15} />
+          打开
+        </button>
+        <div className="w-px h-5 bg-[color:var(--color-border-base)] mx-1" />
+        <button
+          className={toolBtn}
+          onClick={() => getSettingsStore().increaseZoom()}
+          title="放大 (Ctrl+=)"
+          data-kbd="Ctrl ="
+        >
+          <ZoomIn size={15} />
+        </button>
+        <button
+          className={toolBtn}
+          onClick={() => getSettingsStore().decreaseZoom()}
+          title="缩小 (Ctrl+-)"
+          data-kbd="Ctrl -"
+        >
+          <ZoomOut size={15} />
+        </button>
+        <button
+          className={toolBtn}
+          onClick={() => getSettingsStore().resetZoom()}
+          title="重置缩放 (Ctrl+0)"
+          data-kbd="Ctrl 0"
+        >
+          {snapshot.currentZoom}%
+        </button>
+        <div className="w-px h-5 bg-[color:var(--color-border-base)] mx-1" />
+        <button className={toolBtn} onClick={findText} title="查找 (Ctrl+F)" data-kbd="Ctrl F">
+          <Search size={15} />
+        </button>
+        <button className={toolBtn} onClick={() => setExportOpen(true)} title="导出 HTML/PDF">
+          <Download size={15} />
+          导出
+        </button>
+        <button
+          className={toolBtn}
+          disabled={!hasSlides}
+          onClick={toggleSlideMode}
+          title="幻灯片模式"
+        >
+          <Presentation size={15} />
+          幻灯片
+        </button>
+        <div className="flex-1" />
+        <button
+          className={toolBtn}
+          onClick={() => getSettingsStore().toggleTheme()}
+          title="切换主题"
+        >
+          {snapshot.isDark ? <Sun size={15} /> : <Moon size={15} />}
+        </button>
+        <button className={toolBtn} onClick={onOpenSettings} title="设置">
+          <Settings size={15} />
+        </button>
       </div>
+
+      {/* 内容滚动区 / 空态 */}
+      {isEmpty ? (
+        <div className="flex-1 flex flex-col items-center justify-center gap-5 p-8 animate-fade-in">
+          <div className="w-20 h-20 rounded-2xl bg-[color:var(--color-accent-soft)] dark:bg-[color:var(--color-accent-soft-dark)] flex items-center justify-center shadow-md">
+            <BookOpen size={40} className="text-[color:var(--color-accent)]" strokeWidth={1.5} />
+          </div>
+          <div className="text-center">
+            <p className="text-lg font-semibold text-[color:var(--color-text-primary)]">
+              打开一个 Markdown 文件开始阅读
+            </p>
+            <p className="mt-1.5 text-sm text-[color:var(--color-text-secondary)]">
+              支持代码高亮、公式、流程图与幻灯片模式
+            </p>
+          </div>
+          <button
+            className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[color:var(--color-accent)] hover:bg-[color:var(--color-accent-hover)] text-white text-sm font-medium shadow-md transition-colors"
+            onClick={openFile}
+          >
+            <FolderOpen size={16} />
+            打开文件
+          </button>
+          <p className="text-xs text-[color:var(--color-text-tertiary)]">
+            也可以将 .md 文件拖拽到窗口
+          </p>
+        </div>
+      ) : (
+        <div className="flex-1 overflow-auto p-8 px-12">
+          <div
+            ref={contentRef}
+            className={cn(
+              'markdown-content max-w-[800px] mx-auto animate-fade-in',
+              slideMode &&
+                'min-h-[calc(100vh-180px)] p-12 border border-[color:var(--color-border-base)] rounded-2xl shadow-lg bg-[color:var(--color-content)]',
+            )}
+            style={{ fontSize: `${snapshot.settings?.fontSize ?? 16}px` }}
+            dangerouslySetInnerHTML={{ __html: renderedContent }}
+          />
+        </div>
+      )}
 
       {/* 幻灯片控制条 */}
       <AnimatePresence>
@@ -339,61 +462,6 @@ export default function ContentArea({
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* 工具栏 */}
-      <div className="flex gap-2 px-4 py-2 bg-[color:var(--color-toolbar)] border-b border-[color:var(--color-border-base)]">
-        <button className={toolBtn} onClick={openFile} title="打开文件 (Ctrl+O)">
-          <FolderOpen size={15} />
-          打开
-        </button>
-        <button
-          className={toolBtn}
-          onClick={() => getSettingsStore().increaseZoom()}
-          title="放大 (Ctrl+)"
-        >
-          <ZoomIn size={15} />
-        </button>
-        <button
-          className={toolBtn}
-          onClick={() => getSettingsStore().decreaseZoom()}
-          title="缩小 (Ctrl-)"
-        >
-          <ZoomOut size={15} />
-        </button>
-        <button
-          className={toolBtn}
-          onClick={() => getSettingsStore().resetZoom()}
-          title="重置缩放 (Ctrl+0)"
-        >
-          {snapshot.currentZoom}%
-        </button>
-        <button className={toolBtn} onClick={findText} title="查找 (Ctrl+F)">
-          <Search size={15} />
-        </button>
-        <button className={toolBtn} onClick={() => setExportOpen(true)} title="导出 HTML/PDF">
-          <Download size={15} />
-          导出
-        </button>
-        <button
-          className={toolBtn}
-          disabled={!hasSlides}
-          onClick={toggleSlideMode}
-          title="幻灯片模式"
-        >
-          <Presentation size={15} />
-          幻灯片
-        </button>
-        <button
-          className={toolBtn}
-          onClick={() => getSettingsStore().toggleTheme()}
-          title="切换主题"
-        >
-          {snapshot.isDark ? <Sun size={15} /> : <Moon size={15} />}
-        </button>
-        <button className={toolBtn} onClick={onOpenSettings} title="设置">
-          <Settings size={15} />
-        </button>
-      </div>
 
       <ExportDialog open={exportOpen} onOpenChange={setExportOpen} renderedHtml={renderedContent} />
     </div>

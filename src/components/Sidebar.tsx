@@ -54,7 +54,7 @@ export default function Sidebar({
 
   return (
     <div
-      className="flex flex-col h-full bg-[color:var(--color-sidebar)] border-[color:var(--color-border-base)] overflow-hidden"
+      className="surface-sidebar flex flex-col h-full bg-[color:var(--color-sidebar)] border-[color:var(--color-border-base)] overflow-hidden"
       style={{
         width,
         borderRightWidth: sidebarPosition === 'left' ? 1 : 0,
@@ -89,32 +89,34 @@ export default function Sidebar({
         </div>
       </div>
 
-      {/* 视图切换 */}
-      <div className="flex gap-1 p-2 border-b border-[color:var(--color-border-base)]">
-        <button
-          className={cn(
-            'flex-1 flex items-center justify-center gap-1.5 py-2 rounded-md text-[13px] transition-colors',
-            'text-[color:var(--color-text-secondary)] hover:bg-[color:var(--color-sidebar-hover)]',
-            view === 'tree' &&
-              'bg-[color:var(--color-sidebar-active)] border border-[color:var(--color-primary)] text-[color:var(--color-text-primary)]',
-          )}
-          onClick={() => onViewChange('tree')}
-        >
-          <Folder size={14} />
-          目录
-        </button>
-        <button
-          className={cn(
-            'flex-1 flex items-center justify-center gap-1.5 py-2 rounded-md text-[13px] transition-colors',
-            'text-[color:var(--color-text-secondary)] hover:bg-[color:var(--color-sidebar-hover)]',
-            view === 'tabs' &&
-              'bg-[color:var(--color-sidebar-active)] border border-[color:var(--color-primary)] text-[color:var(--color-text-primary)]',
-          )}
-          onClick={() => onViewChange('tabs')}
-        >
-          <FileStack size={14} />
-          页签
-        </button>
+      {/* 视图切换 — 分段控件 */}
+      <div className="p-2 border-b border-[color:var(--color-border-base)]">
+        <div className="flex p-0.5 rounded-lg bg-[color:var(--color-bg-tertiary)]">
+          <button
+            className={cn(
+              'flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-[13px] transition-all',
+              view === 'tree'
+                ? 'bg-[color:var(--color-sidebar)] shadow-sm font-medium text-[color:var(--color-text-primary)]'
+                : 'text-[color:var(--color-text-secondary)] hover:text-[color:var(--color-text-primary)]',
+            )}
+            onClick={() => onViewChange('tree')}
+          >
+            <Folder size={14} />
+            目录
+          </button>
+          <button
+            className={cn(
+              'flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-[13px] transition-all',
+              view === 'tabs'
+                ? 'bg-[color:var(--color-sidebar)] shadow-sm font-medium text-[color:var(--color-text-primary)]'
+                : 'text-[color:var(--color-text-secondary)] hover:text-[color:var(--color-text-primary)]',
+            )}
+            onClick={() => onViewChange('tabs')}
+          >
+            <FileStack size={14} />
+            页签
+          </button>
+        </div>
       </div>
 
       {/* 视图内容 */}
@@ -138,14 +140,14 @@ export default function Sidebar({
         )}
       </div>
 
-      {/* 底部 */}
-      <div className="p-2 border-t border-[color:var(--color-border-base)]">
+      {/* 底部 — 精简为图标按钮 */}
+      <div className="flex justify-end p-1.5 border-t border-[color:var(--color-border-base)]">
         <button
-          className="flex w-full items-center gap-2 px-3 py-2 rounded-md text-sm text-[color:var(--color-text-secondary)] hover:bg-[color:var(--color-sidebar-hover)] hover:text-[color:var(--color-text-primary)] transition-colors"
+          className="icon-btn-28"
           onClick={onOpenSettings}
+          title="设置"
         >
           <Settings size={15} />
-          设置
         </button>
       </div>
     </div>
