@@ -4,10 +4,10 @@ import { settingsStore } from '../../src/stores/settings'
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn((cmd: string) => {
-    if (cmd === 'read_config_file') {
+    if (cmd === 'read_data_file') {
       return Promise.reject(new Error('File not found'))
     }
-    if (cmd === 'write_config_file') {
+    if (cmd === 'write_data_file') {
       return Promise.resolve(null)
     }
     return Promise.resolve('/app/data/dir/')
@@ -498,8 +498,8 @@ describe('Stores', () => {
 
         expect(ok).toBe(true)
         expect(core.invoke).toHaveBeenCalledWith(
-          'write_config_file',
-          expect.objectContaining({ content: expect.any(String) })
+          'write_data_file',
+          expect.objectContaining({ fileName: 'config.json', content: expect.any(String) })
         )
       })
 

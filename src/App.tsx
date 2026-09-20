@@ -177,12 +177,27 @@ export default function App() {
                 const lastSlash = path.lastIndexOf('/')
                 tabStore.setWorkingDirectory(lastSlash > 0 ? path.substring(0, lastSlash) : '')
               }
+            } else if (settingsStore.settings.restoreSession) {
+              const { loadSession } = await import('./lib/session')
+              const session = await loadSession()
+              if (cancelled) return
+              if (session.openPaths.length > 0 || session.workingDirectory) {
+                await tabStore.restoreSession(session)
+              }
             }
           } catch (e) {
             console.error('[MaduReader] Failed to process args:', e)
           }
         } else {
           await tabStore.setVirtualWorkspace('web-demo', demoFiles)
+          if (settingsStore.settings.restoreSession) {
+            const { loadSession } = await import('./lib/session')
+            const session = await loadSession()
+            if (cancelled) return
+            if (session.openPaths.length > 0 || session.workingDirectory) {
+              await tabStore.restoreSession(session)
+            }
+          }
         }
       } catch (e) {
         console.error('[MaduReader] init error:', e)
@@ -202,6 +217,26 @@ export default function App() {
     return () => {
       document.removeEventListener('open-settings', open)
       window.removeEventListener('open-settings', open)
+    }
+  }, [])
+
+  // 会话持久化：打开/关闭/切换标签后防抖写入 session.json / localStorage
+  useEffect(() => {
+    let timer: number | undefined
+    const persist = () => {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(() => {
+        const settingsStore = getSettingsStore()
+        if (!settingsStore.settings.restoreSession) return
+        void import('./lib/session').then(({ saveSession }) =>
+          saveSession(getTabStore().snapshotSession()),
+        )
+      }, 500)
+    }
+    const unsubscribe = getTabStore().subscribe(persist)
+    return () => {
+      unsubscribe()
+      window.clearTimeout(timer)
     }
   }, [])
 

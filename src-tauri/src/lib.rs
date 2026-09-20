@@ -60,25 +60,36 @@ fn add_allowed_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
     result.map_err(|e| format!("failed to allow path: {e}"))
 }
 
-/// 配置文件统一由 Rust 侧读写，绕开前端 fs 插件作用域限制，
+/// 应用数据文件统一由 Rust 侧读写，绕开前端 fs 插件作用域限制，
 /// 写入前自动创建目录，避免持久化被静默拦截导致设置丢失。
-#[tauri::command]
-fn read_config_file() -> Result<String, String> {
+/// 仅允许 madureader 数据目录下的普通文件名，拒绝任何路径分隔符。
+fn data_file_path(file_name: &str) -> Result<std::path::PathBuf, String> {
+    if file_name.is_empty()
+        || file_name.contains('/')
+        || file_name.contains('\\')
+        || file_name.contains("..")
+    {
+        return Err(format!("invalid file name: {file_name}"));
+    }
     let dir = dirs::data_dir()
         .ok_or_else(|| "Could not resolve app data directory".to_string())?
         .join("madureader");
-    let path = dir.join("config.json");
-    std::fs::read_to_string(&path).map_err(|e| format!("failed to read config: {e}"))
+    Ok(dir.join(file_name))
 }
 
 #[tauri::command]
-fn write_config_file(content: String) -> Result<(), String> {
-    let dir = dirs::data_dir()
-        .ok_or_else(|| "Could not resolve app data directory".to_string())?
-        .join("madureader");
-    std::fs::create_dir_all(&dir).map_err(|e| format!("failed to create dir: {e}"))?;
-    std::fs::write(dir.join("config.json"), content)
-        .map_err(|e| format!("failed to write config: {e}"))
+fn read_data_file(file_name: String) -> Result<String, String> {
+    let path = data_file_path(&file_name)?;
+    std::fs::read_to_string(&path).map_err(|e| format!("failed to read {file_name}: {e}"))
+}
+
+#[tauri::command]
+fn write_data_file(file_name: String, content: String) -> Result<(), String> {
+    let path = data_file_path(&file_name)?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("failed to create dir: {e}"))?;
+    }
+    std::fs::write(&path, content).map_err(|e| format!("failed to write {file_name}: {e}"))
 }
 
 /// 前端主题切换时同步托盘图标深浅（dark=true 用白色图形）。
@@ -116,8 +127,8 @@ pub fn run() {
             app_data_dir,
             add_allowed_path,
             set_tray_theme,
-            read_config_file,
-            write_config_file
+            read_data_file,
+            write_data_file
         ])
         .setup(|app| {
             #[cfg(desktop)]

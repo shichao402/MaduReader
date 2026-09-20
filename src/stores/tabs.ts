@@ -1,6 +1,8 @@
 // Vanilla store：框架无关的单例状态 + 手动通知。
 // React 侧通过 useSyncExternalStore 订阅，不再依赖任何响应式框架。
 
+import type { SessionData } from '../lib/session'
+
 export interface Tab {
   id: string
   path: string
@@ -415,6 +417,41 @@ class TabStore {
   openFileFromTree(path: string): void {
     if (!path.endsWith('.md')) return
     this.openFile(path).catch(console.error)
+  }
+
+  /** 当前会话快照：工作目录、打开的文件（按标签顺序）、最后显示的文件 */
+  snapshotSession(): SessionData {
+    return {
+      workingDirectory: this._workingDirectory,
+      openPaths: this._tabs.filter((t) => !t.isUntitled).map((t) => t.path),
+      activePath: this.activeTab && !this.activeTab.isUntitled ? this.activeTab.path : null,
+    }
+  }
+
+  /** 启动时恢复上次会话：授权并逐个打开文件，最后切到最后活动的文件 */
+  async restoreSession(session: SessionData): Promise<void> {
+    if (session.workingDirectory) {
+      this._workingDirectory = normalizePath(session.workingDirectory)
+    }
+    const activeNormalized = session.activePath ? normalizePath(session.activePath) : null
+    const paths = activeNormalized
+      ? [activeNormalized, ...session.openPaths.filter((p) => normalizePath(p) !== activeNormalized)]
+      : session.openPaths
+    for (const path of paths) {
+      try {
+        await this.openFile(path)
+      } catch (e) {
+        console.error('[Tabs] Failed to restore session file:', path, e)
+      }
+    }
+    if (activeNormalized) {
+      const target = this._tabs.find((t) => t.path === activeNormalized)
+      if (target) this._activeTabId = target.id
+    }
+    if (this._workingDirectory && this._fileTree.length === 0) {
+      await this.refreshFileTree()
+    }
+    this.emit()
   }
 }
 

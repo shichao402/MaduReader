@@ -5,8 +5,8 @@
  *   - 应用图标: 圆角方形底 + 居中主体。大尺寸(>=64)留 4% 外边距、主体占 60%；
  *     小尺寸满幅、主体占 68%（保证小尺寸下主体可辨识）。
  *   - 应用图标固化浅色系（白底圆角 + 深蓝图形 + 细描边），不随主题变化。
- *   - 托盘图标透明底，分 light（深蓝图形，配浅色主题）与 dark（白色图形，配深色主题），
- *     运行时由 Rust 命令 set_tray_theme 按应用主题切换。
+ *   - 托盘图标带圆角底色，分 light（白底深蓝图形，配浅色主题）与 dark（深蓝底白图形，
+ *     配深色主题），运行时由 Rust 命令 set_tray_theme 按应用主题切换。
  * 产出: icons/light  浅色系应用图标 + 浅色托盘
  *       icons/dark   深色托盘
  *       src-tauri/icons  打包用图标 (ico/icns/png/svg/托盘对图)
@@ -39,24 +39,23 @@ const C = {
 const PROFILES = {
   appLarge: { pad: 0.04, radius: 0.22, glyph: 0.60, border: true },
   appSmall: { pad: 0.00, radius: 0.18, glyph: 0.68, border: true },
-  tray:     { pad: 0.00, radius: 0.00, glyph: 0.84, border: false }
+  tray:     { pad: 0.00, radius: 0.20, glyph: 0.64, border: true }
 };
 
-/** 构建单枚 SVG 源（应用图标恒为浅色系；style 仅对托盘生效） */
-function buildSvg({ size, style = 'light', profile, transparent = false }) {
+/** 构建单枚 SVG 源（应用图标恒为浅色系；托盘底色随 style 切换） */
+function buildSvg({ size, style = 'light', profile }) {
   const p = PROFILES[profile];
-  const glyphFill = profile === 'tray' && style === 'dark' ? C.darkGlyph : C.lightGlyph;
+  const trayDark = profile === 'tray' && style === 'dark';
+  const bgFill = profile === 'tray' && trayDark ? C.lightGlyph : C.lightBg;
+  const glyphFill = trayDark ? C.darkGlyph : C.lightGlyph;
   const pad = size * p.pad;
   const side = size - pad * 2;
   const r = side * p.radius;
   const strokeW = p.border ? Math.max(1, size * 0.01) : 0;
-  let bg = '';
-  if (!transparent) {
-    const stroke = p.border
-      ? ` stroke="${C.lightBorder}" stroke-width="${strokeW}"`
-      : '';
-    bg = `<rect x="${pad}" y="${pad}" width="${side}" height="${side}" rx="${r}" fill="${C.lightBg}"${stroke}/>`;
-  }
+  const stroke = p.border && !trayDark
+    ? ` stroke="${C.lightBorder}" stroke-width="${strokeW}"`
+    : '';
+  const bg = `<rect x="${pad}" y="${pad}" width="${side}" height="${side}" rx="${r}" fill="${bgFill}"${stroke}/>`;
   const s = (size * p.glyph) / (bbox.x1 - bbox.x0);
   const tx = size / 2 - ((bbox.x0 + bbox.x1) / 2) * s;
   const ty = size / 2 - ((bbox.y0 + bbox.y1) / 2) * s;
@@ -124,14 +123,14 @@ async function main() {
     .map(s => [s, renderPng({ size: s, profile: appProfile(s) })]);
   add('light/macos/icon.icns', buildIcns(new Map(icnsSources)));
 
-  /* ---------- 托盘图标（透明底，深浅两套，运行时按主题切换） ---------- */
+  /* ---------- 托盘图标（带圆角底色，深浅两套，运行时按主题切换） ---------- */
   for (const style of ['light', 'dark']) {
     for (const s of [16, 20, 24, 32, 48]) {
       add(`${style}/tray/tray-${s}.png`,
-        renderPng({ size: s, style, profile: 'tray', transparent: true }));
+        renderPng({ size: s, style, profile: 'tray' }));
     }
     add(`${style}/tray/tray.svg`,
-      Buffer.from(buildSvg({ size: 1400, style, profile: 'tray', transparent: true })));
+      Buffer.from(buildSvg({ size: 1400, style, profile: 'tray' })));
   }
 
   /* ---------- 同步打包图标到 src-tauri/icons ---------- */
@@ -162,7 +161,7 @@ async function main() {
 ## 设计约定
 - 应用图标固化浅色系（白底圆角 + 深蓝图形 + 细描边），不随主题变化
 - 大尺寸(>=64px)留 4% 边距、主体占 60%；小尺寸满幅、主体占 68%
-- 托盘图标透明底：light（深蓝图形，浅色主题）/ dark（白色图形，深色主题），
+- 托盘图标带圆角底色：light（白底深蓝图形，浅色主题）/ dark（深蓝底白图形，深色主题），
   运行时由 Rust 命令 \`set_tray_theme\` 按应用主题切换
 
 ## 目录

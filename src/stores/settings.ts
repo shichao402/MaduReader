@@ -19,6 +19,7 @@ export interface Settings {
   codeHighlightTheme: string
   showLineNumbers: boolean
   autoSave: boolean
+  restoreSession: boolean
   mermaidConfig: MermaidConfig
   plantUmlServer: string
   proxyEnabled: boolean
@@ -36,6 +37,7 @@ export const DEFAULT_SETTINGS: Settings = {
   codeHighlightTheme: 'github',
   showLineNumbers: false,
   autoSave: false,
+  restoreSession: true,
   mermaidConfig: {
     theme: 'default',
     securityLevel: 'loose',
@@ -133,7 +135,7 @@ class SettingsStore {
 
       let data: string | null = null
       try {
-        data = await invoke<string>('read_config_file')
+        data = await invoke<string>('read_data_file', { fileName: 'config.json' })
       } catch {
         // 配置文件不存在时使用默认值
       }
@@ -161,7 +163,8 @@ class SettingsStore {
         return true
       }
 
-      await invoke('write_config_file', {
+      await invoke('write_data_file', {
+        fileName: 'config.json',
         content: JSON.stringify(this._settings, null, 2),
       })
       return true

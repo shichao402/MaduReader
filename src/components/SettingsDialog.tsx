@@ -58,6 +58,7 @@ type Draft = Pick<
   | 'zoom'
   | 'codeHighlightTheme'
   | 'showLineNumbers'
+  | 'restoreSession'
   | 'mermaidConfig'
   | 'plantUmlServer'
   | 'proxyEnabled'
@@ -93,6 +94,7 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
         codeHighlightTheme: 'github',
         showLineNumbers: false,
         autoSave: false,
+        restoreSession: true,
         mermaidConfig: {
           theme: 'default',
           securityLevel: 'loose',
@@ -144,6 +146,7 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
     zoom: s.zoom,
     codeHighlightTheme: s.codeHighlightTheme,
     showLineNumbers: s.showLineNumbers,
+    restoreSession: s.restoreSession,
     mermaidConfig: s.mermaidConfig,
     plantUmlServer: s.plantUmlServer,
     proxyEnabled: s.proxyEnabled,
@@ -185,6 +188,14 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
                   ))}
                 </select>
               </div>
+              <label className="flex items-center gap-2 cursor-pointer text-sm mb-3">
+                <input
+                  type="checkbox"
+                  checked={draft.restoreSession}
+                  onChange={(e) => commit({ restoreSession: e.target.checked })}
+                />
+                启动时恢复上次的目录和打开的文件
+              </label>
               <div className="mb-3">
                 <label className={label}>字体大小</label>
                 <select
