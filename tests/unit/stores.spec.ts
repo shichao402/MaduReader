@@ -3,7 +3,15 @@ import { tabStore } from '../../src/stores/tabs'
 import { settingsStore } from '../../src/stores/settings'
 
 vi.mock('@tauri-apps/api/core', () => ({
-  invoke: vi.fn().mockResolvedValue('/app/data/dir/')
+  invoke: vi.fn((cmd: string) => {
+    if (cmd === 'read_config_file') {
+      return Promise.reject(new Error('File not found'))
+    }
+    if (cmd === 'write_config_file') {
+      return Promise.resolve(null)
+    }
+    return Promise.resolve('/app/data/dir/')
+  })
 }))
 
 vi.mock('@tauri-apps/plugin-fs', () => ({
@@ -250,7 +258,7 @@ describe('Stores', () => {
     describe('initial state', () => {
       it('should initialize with default settings', () => {
         expect(store.settings).toBeDefined()
-        expect(store.settings.theme).toBe('light')
+        expect(store.settings.theme).toBe('system')
         expect(store.settings.fontSize).toBe(16)
         expect(store.settings.zoom).toBe(100)
       })
@@ -483,20 +491,25 @@ describe('Stores', () => {
     })
 
     describe('saveSettings', () => {
-      it('should save settings successfully', async () => {
-        const fs = await import('@tauri-apps/plugin-fs')
-        
-        await store.saveSettings()
-        
-        expect(fs.writeTextFile).toHaveBeenCalled()
+      it('should save settings successfully via rust command', async () => {
+        const core = await import('@tauri-apps/api/core')
+
+        const ok = await store.saveSettings()
+
+        expect(ok).toBe(true)
+        expect(core.invoke).toHaveBeenCalledWith(
+          'write_config_file',
+          expect.objectContaining({ content: expect.any(String) })
+        )
       })
 
-      it('should handle save error gracefully', async () => {
-        const fs = await import('@tauri-apps/plugin-fs')
-        fs.writeTextFile.mockRejectedValueOnce(new Error('Write failed'))
-        
-        // Should not throw
-        await store.saveSettings()
+      it('should return false on save error', async () => {
+        const core = await import('@tauri-apps/api/core')
+        ;(core.invoke as any).mockRejectedValueOnce(new Error('Write failed'))
+
+        const ok = await store.saveSettings()
+
+        expect(ok).toBe(false)
       })
     })
   })

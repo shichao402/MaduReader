@@ -27,7 +27,7 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  theme: 'light',
+  theme: 'system',
   fontSize: 16,
   zoom: 100,
   sidebarCollapsed: false,
@@ -131,29 +131,21 @@ class SettingsStore {
         return
       }
 
-      const fs = await import('@tauri-apps/plugin-fs')
-
-      const appDataDir = await invoke<string>('app_data_dir')
-
-      const configPath = `${appDataDir}config.json`
-
-      // 检查配置文件是否存在
-      let isFile = false
+      let data: string | null = null
       try {
-        await fs.readTextFile(configPath)
-        isFile = true
+        data = await invoke<string>('read_config_file')
       } catch {
-        isFile = false
+        // 配置文件不存在时使用默认值
       }
 
-      if (isFile) {
-        const data = await fs.readTextFile(configPath)
+      if (data) {
         const loaded = JSON.parse(data)
         this._settings = { ...DEFAULT_SETTINGS, ...loaded }
       }
       this._isLoaded = true
       this.applyTheme()
       void this.applyWindowMaterial()
+      this.listenSystemTheme()
       this.emit()
     } catch (e) {
       console.error('[Settings] Failed to load settings:', e)
@@ -162,21 +154,34 @@ class SettingsStore {
     }
   }
 
-  async saveSettings(): Promise<void> {
+  async saveSettings(): Promise<boolean> {
     try {
       if (!isTauriRuntime()) {
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(this._settings))
-        return
+        return true
       }
 
-      const fs = await import('@tauri-apps/plugin-fs')
-      const appDataDir = await invoke<string>('app_data_dir')
-      const configPath = `${appDataDir}config.json`
-
-      await fs.writeTextFile(configPath, JSON.stringify(this._settings, null, 2))
+      await invoke('write_config_file', {
+        content: JSON.stringify(this._settings, null, 2),
+      })
+      return true
     } catch (e) {
       console.error('[Settings] Failed to save settings:', e)
+      return false
     }
+  }
+
+  /** 监听系统深浅色变化，theme=system 时实时跟随 */
+  private listenSystemTheme(): void {
+    if (typeof window === 'undefined' || !window.matchMedia) return
+    window
+      .matchMedia('(prefers-color-scheme: dark)')
+      .addEventListener('change', () => {
+        if (this._settings.theme === 'system') {
+          this.applyTheme()
+          this.emit()
+        }
+      })
   }
 
   applyTheme(): void {

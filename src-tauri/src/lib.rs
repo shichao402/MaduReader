@@ -60,6 +60,27 @@ fn add_allowed_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
     result.map_err(|e| format!("failed to allow path: {e}"))
 }
 
+/// 配置文件统一由 Rust 侧读写，绕开前端 fs 插件作用域限制，
+/// 写入前自动创建目录，避免持久化被静默拦截导致设置丢失。
+#[tauri::command]
+fn read_config_file() -> Result<String, String> {
+    let dir = dirs::data_dir()
+        .ok_or_else(|| "Could not resolve app data directory".to_string())?
+        .join("madureader");
+    let path = dir.join("config.json");
+    std::fs::read_to_string(&path).map_err(|e| format!("failed to read config: {e}"))
+}
+
+#[tauri::command]
+fn write_config_file(content: String) -> Result<(), String> {
+    let dir = dirs::data_dir()
+        .ok_or_else(|| "Could not resolve app data directory".to_string())?
+        .join("madureader");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("failed to create dir: {e}"))?;
+    std::fs::write(dir.join("config.json"), content)
+        .map_err(|e| format!("failed to write config: {e}"))
+}
+
 /// 前端主题切换时同步托盘图标深浅（dark=true 用白色图形）。
 #[tauri::command]
 fn set_tray_theme(app: tauri::AppHandle, dark: bool) -> Result<(), String> {
@@ -94,7 +115,9 @@ pub fn run() {
             get_args,
             app_data_dir,
             add_allowed_path,
-            set_tray_theme
+            set_tray_theme,
+            read_config_file,
+            write_config_file
         ])
         .setup(|app| {
             #[cfg(desktop)]

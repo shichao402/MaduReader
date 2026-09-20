@@ -1,5 +1,6 @@
 import * as Dialog from '@radix-ui/react-dialog'
 import { X } from 'lucide-react'
+import { useState } from 'react'
 import { getSettingsStore } from '../bridge'
 import type { Settings } from '../stores/settings'
 
@@ -66,6 +67,7 @@ type Draft = Pick<
 export default function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const settingsStore = getSettingsStore()
   const s = settingsStore.settings
+  const [saveState, setSaveState] = useState<'idle' | 'saved' | 'error'>('idle')
 
   const label = 'block text-sm text-[color:var(--color-text-primary)] mb-1.5'
   const input =
@@ -82,7 +84,7 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
   function resetToDefaults() {
     if (confirm('确定要重置所有设置为默认值吗？')) {
       commit({
-        theme: 'light',
+        theme: 'system',
         fontSize: 16,
         zoom: 100,
         sidebarCollapsed: false,
@@ -307,12 +309,26 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
 
             <div className="flex flex-wrap gap-3 pt-5 border-t border-[color:var(--color-border-base)]">
               <button
-                className="px-4 py-2 text-sm font-medium rounded-md bg-[color:var(--color-primary)] text-white hover:bg-[color:var(--color-primary-hover)] transition-colors"
-                onClick={() => {
-                  settingsStore.saveSettings()
+                className={
+                  saveState === 'error'
+                    ? 'px-4 py-2 text-sm font-medium rounded-md bg-red-600 text-white hover:bg-red-700 transition-colors'
+                    : 'px-4 py-2 text-sm font-medium rounded-md bg-[color:var(--color-primary)] text-white hover:bg-[color:var(--color-primary-hover)] transition-colors'
+                }
+                onClick={async () => {
+                  const ok = await settingsStore.saveSettings()
+                  if (ok) {
+                    setSaveState('saved')
+                  } else {
+                    setSaveState('error')
+                  }
+                  window.setTimeout(() => setSaveState('idle'), 2000)
                 }}
               >
-                保存设置
+                {saveState === 'saved'
+                  ? '已保存'
+                  : saveState === 'error'
+                    ? '保存失败'
+                    : '保存设置'}
               </button>
               <button
                 className="px-4 py-2 text-sm font-medium rounded-md bg-[color:var(--color-bg-secondary)] border border-[color:var(--color-border-base)] text-[color:var(--color-text-primary)] hover:bg-[color:var(--color-bg-hover)] transition-colors"
