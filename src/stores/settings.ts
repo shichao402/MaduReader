@@ -15,6 +15,7 @@ export interface Settings {
   zoom: number
   sidebarCollapsed: boolean
   sidebarPosition: 'left' | 'right'
+  sidebarWidth: number
   sidebarView: 'tree' | 'outline'
   codeHighlightTheme: string
   showLineNumbers: boolean
@@ -34,6 +35,7 @@ export const DEFAULT_SETTINGS: Settings = {
   zoom: 100,
   sidebarCollapsed: false,
   sidebarPosition: 'left',
+  sidebarWidth: 280,
   sidebarView: 'tree',
   codeHighlightTheme: 'github',
   showLineNumbers: false,

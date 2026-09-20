@@ -13,8 +13,8 @@
     "windows": [
       {
         "title": "Ma读",
-        "width": 1200,
-        "height": 800,
+        "width": 1320,
+        "height": 920,
         "minWidth": 600,
         "minHeight": 400,
         "resizable": true,

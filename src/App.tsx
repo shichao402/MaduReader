@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { getSettingsStore, getTabStore, useStores } from './hooks/useStores'
 import Sidebar from './components/Sidebar'
 import SidebarIconBar from './components/SidebarIconBar'
@@ -134,6 +134,8 @@ export default function App() {
   const { tabStore, settingsStore } = useStores()
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [sidebarPosition, setSidebarPosition] = useState<'left' | 'right'>('left')
+  const [sidebarWidth, setSidebarWidth] = useState(280)
+  const widthLoadedRef = useRef(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [sidebarView, setSidebarView] = useState<'tree' | 'outline'>('outline')
@@ -153,6 +155,8 @@ export default function App() {
         if (cancelled) return
         setSidebarCollapsed(settingsStore.settings.sidebarCollapsed)
         setSidebarPosition(settingsStore.settings.sidebarPosition)
+        setSidebarWidth(settingsStore.settings.sidebarWidth)
+        widthLoadedRef.current = true
         if (isTauri) {
           try {
             const { invoke } = await import('@tauri-apps/api/core')
@@ -381,6 +385,18 @@ export default function App() {
     }
   }
 
+  // 侧栏宽度：拖拽中仅更新视图，停止 600ms 后写入设置，避免拖动过程高频落盘；
+  // 用已加载标记守门，不能特判 280（否则双击复位到默认值反而不会持久化）
+  useEffect(() => {
+    if (!widthLoadedRef.current) return
+    const settingsStore = getSettingsStore()
+    const timer = window.setTimeout(() => {
+      settingsStore.update({ sidebarWidth }, { save: false })
+      settingsStore.saveSettings()
+    }, 600)
+    return () => window.clearTimeout(timer)
+  }, [sidebarWidth])
+
   function toggleSidebar() {
     setSidebarCollapsed((v) => {
       settingsStore.update({ sidebarCollapsed: !v }, { save: false })
@@ -445,6 +461,8 @@ export default function App() {
             activePath={tabStore.tabs.find((t) => t.id === tabStore.activeTabId)?.path ?? null}
             workingDirectory={tabStore.workingDirectory}
             sidebarPosition={sidebarPosition}
+            sidebarWidth={sidebarWidth}
+            onSidebarWidthChange={setSidebarWidth}
             onViewChange={setSidebarView}
             onCollapse={toggleSidebar}
             onTogglePosition={toggleSidebarPosition}
