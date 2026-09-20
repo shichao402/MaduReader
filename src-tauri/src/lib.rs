@@ -282,6 +282,402 @@ fn write_data_file(file_name: String, content: String) -> Result<(), String> {
     std::fs::write(&path, content).map_err(|e| format!("failed to write {file_name}: {e}"))
 }
 
+/// ---------- 文件关联（跨平台） ----------
+/// 打包层：tauri.conf.json bundle.fileAssociations 声明 .md/.markdown（NSIS 注册表 /
+/// macOS Info.plist / Linux desktop 文件 MimeType），安装即出现在系统"打开方式"里。
+/// 运行时层：下面三个命令供设置页在便携版/免安装场景主动注册与设为默认。
+
+const ASSOC_EXTS: [&str; 2] = ["md", "markdown"];
+#[cfg(windows)]
+const ASSOC_PROGID: &str = "MaduReader.md";
+
+#[derive(serde::Serialize)]
+struct AssocStatus {
+    ext: String,
+    /// 本机的打开方式列表里是否已注册 Ma读（ProgID / bundle id / desktop 入口存在）
+    registered: bool,
+    /// 是否已是系统默认打开方式
+    is_default: bool,
+    /// 当前默认打开程序的可读标识
+    current_handler: Option<String>,
+}
+
+#[cfg(windows)]
+mod windows_assoc {
+    use super::{AssocStatus, ASSOC_EXTS, ASSOC_PROGID};
+    use windows_sys::Win32::System::Registry::{
+        RegCloseKey, RegCreateKeyExW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW, HKEY,
+        HKEY_CLASSES_ROOT, HKEY_CURRENT_USER, KEY_READ, KEY_SET_VALUE, REG_OPTION_NON_VOLATILE,
+        REG_SZ,
+    };
+    use windows_sys::Win32::UI::Shell::{SHChangeNotify, SHCNE_ASSOCCHANGED, SHCNF_IDLIST};
+
+    fn to_wide(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    fn reg_set_string(
+        root: HKEY,
+        subkey: &str,
+        value_name: Option<&str>,
+        data: &str,
+    ) -> Result<(), String> {
+        unsafe {
+            let sub_w = to_wide(subkey);
+            let mut hk: HKEY = std::ptr::null_mut();
+            let err = RegCreateKeyExW(
+                root,
+                sub_w.as_ptr(),
+                0,
+                std::ptr::null(),
+                REG_OPTION_NON_VOLATILE,
+                KEY_SET_VALUE,
+                std::ptr::null(),
+                &mut hk,
+                std::ptr::null_mut(),
+            );
+            if err != 0 {
+                return Err(format!("RegCreateKeyExW({subkey}) failed: {err}"));
+            }
+            let name_w: Vec<u16> = match value_name {
+                Some(n) => to_wide(n),
+                None => Vec::new(),
+            };
+            let name_ptr = if value_name.is_some() {
+                name_w.as_ptr()
+            } else {
+                std::ptr::null()
+            };
+            let mut data_w = to_wide(data);
+            let err = RegSetValueExW(
+                hk,
+                name_ptr,
+                0,
+                REG_SZ,
+                data_w.as_mut_ptr() as *const u8,
+                (data_w.len() * 2) as u32,
+            );
+            RegCloseKey(hk);
+            if err != 0 {
+                return Err(format!("RegSetValueExW({subkey}) failed: {err}"));
+            }
+            Ok(())
+        }
+    }
+
+    fn reg_get_string(root: HKEY, subkey: &str, value_name: &str) -> Option<String> {
+        unsafe {
+            let sub_w = to_wide(subkey);
+            let mut hk: HKEY = std::ptr::null_mut();
+            if RegOpenKeyExW(root, sub_w.as_ptr(), 0, KEY_READ, &mut hk) != 0 {
+                return None;
+            }
+            let name_w = to_wide(value_name);
+            let mut buf = [0u16; 1024];
+            let mut data_len = (buf.len() * 2) as u32;
+            let err = RegQueryValueExW(
+                hk,
+                name_w.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null_mut(),
+                buf.as_mut_ptr() as *mut u8,
+                &mut data_len,
+            );
+            RegCloseKey(hk);
+            if err != 0 {
+                return None;
+            }
+            let chars = (data_len as usize / 2).min(buf.len());
+            Some(
+                String::from_utf16_lossy(&buf[..chars])
+                    .trim_end_matches('\0')
+                    .to_string(),
+            )
+        }
+    }
+
+    fn progid_registered() -> bool {
+        reg_get_string(
+            HKEY_CURRENT_USER,
+            r"Software\Classes\MaduReader.md\shell\open\command",
+            "",
+        )
+        .is_some()
+    }
+
+    fn current_handler(ext: &str) -> Option<String> {
+        let user_choice = format!(
+            r"Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.{ext}\UserChoice"
+        );
+        reg_get_string(HKEY_CURRENT_USER, &user_choice, "ProgId")
+            .or_else(|| reg_get_string(HKEY_CLASSES_ROOT, &format!(".{ext}"), ""))
+    }
+
+    pub fn status() -> Vec<AssocStatus> {
+        let registered = progid_registered();
+        ASSOC_EXTS
+            .iter()
+            .map(|ext| {
+                let handler = current_handler(ext);
+                AssocStatus {
+                    ext: ext.to_string(),
+                    registered,
+                    is_default: handler.as_deref() == Some(ASSOC_PROGID),
+                    current_handler: handler,
+                }
+            })
+            .collect()
+    }
+
+    /// 写入 HKCU ProgID 并加入扩展名的"打开方式"列表（无需管理员权限）。
+    /// 真正的 UserChoice 默认项受系统 hash 保护无法直接写，注册后由用户在
+    /// 系统"默认应用"设置或资源管理器"打开方式"里一键选择。
+    pub fn set(ext: &str) -> Result<(), String> {
+        if !ASSOC_EXTS.contains(&ext) {
+            return Err(format!("不支持的扩展名: {ext}"));
+        }
+        let exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
+        let exe_str = exe.to_string_lossy().to_string();
+        reg_set_string(
+            HKEY_CURRENT_USER,
+            r"Software\Classes\MaduReader.md",
+            None,
+            "Ma读 Markdown 文档",
+        )?;
+        reg_set_string(
+            HKEY_CURRENT_USER,
+            r"Software\Classes\MaduReader.md\shell\open\command",
+            None,
+            &format!("\"{exe_str}\" \"%1\""),
+        )?;
+        reg_set_string(
+            HKEY_CURRENT_USER,
+            r"Software\Classes\MaduReader.md\DefaultIcon",
+            None,
+            &format!("{exe_str},0"),
+        )?;
+        let open_with = format!(r"Software\Classes\.{ext}\OpenWithProgids");
+        reg_set_string(HKEY_CURRENT_USER, &open_with, Some(ASSOC_PROGID), "")?;
+        unsafe {
+            SHChangeNotify(SHCNE_ASSOCCHANGED as i32, SHCNF_IDLIST, std::ptr::null(), std::ptr::null());
+        }
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod macos_assoc {
+    use super::{AssocStatus, ASSOC_EXTS};
+    use core_foundation::base::{CFStringRef, TCFType};
+    use core_foundation::string::CFString;
+
+    /// 系统内置的 Markdown UTI（macOS 10.13+）
+    const UTI_MARKDOWN: &str = "net.daringfireball.markdown";
+    const K_LS_ROLES_ALL: u32 = 0xffff_ffff;
+
+    #[link(name = "CoreServices", kind = "framework")]
+    unsafe extern "C" {
+        fn LSSetDefaultRoleHandlerForContentType(
+            in_content_type: CFStringRef,
+            in_roles: u32,
+            in_handler_bundle_id: CFStringRef,
+        );
+        fn LSCopyDefaultRoleHandlerForContentType(
+            in_content_type: CFStringRef,
+            in_roles: u32,
+        ) -> CFStringRef;
+    }
+
+    pub fn status(self_bundle_id: &str) -> Vec<AssocStatus> {
+        let uti = CFString::new(UTI_MARKDOWN);
+        let handler = unsafe {
+            let raw =
+                LSCopyDefaultRoleHandlerForContentType(uti.as_concrete_TypeRef(), K_LS_ROLES_ALL);
+            if raw.is_null() {
+                None
+            } else {
+                Some(CFString::wrap_under_create_rule(raw).to_string())
+            }
+        };
+        let is_default = handler.as_deref() == Some(self_bundle_id);
+        ASSOC_EXTS
+            .iter()
+            .map(|ext| AssocStatus {
+                ext: ext.to_string(),
+                registered: true,
+                is_default,
+                current_handler: handler.clone(),
+            })
+            .collect()
+    }
+
+    pub fn set(self_bundle_id: &str) -> Result<(), String> {
+        let uti = CFString::new(UTI_MARKDOWN);
+        let bundle = CFString::new(self_bundle_id);
+        unsafe {
+            LSSetDefaultRoleHandlerForContentType(
+                uti.as_concrete_TypeRef(),
+                K_LS_ROLES_ALL,
+                bundle.as_concrete_TypeRef(),
+            );
+        }
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "linux")]
+mod linux_assoc {
+    use super::{AssocStatus, ASSOC_EXTS};
+    use std::path::PathBuf;
+    use std::process::Command;
+
+    const MIME: &str = "text/markdown";
+    const DESKTOP_CANDIDATES: [&str; 3] = [
+        "madureader.desktop",
+        "MaduReader.desktop",
+        "com.shichao402.madureader.desktop",
+    ];
+
+    fn desktop_search_dirs() -> Vec<PathBuf> {
+        let mut dirs = vec![
+            PathBuf::from("/usr/share/applications"),
+            PathBuf::from("/usr/local/share/applications"),
+        ];
+        if let Ok(home) = std::env::var("HOME") {
+            dirs.push(PathBuf::from(home).join(".local/share/applications"));
+        }
+        dirs
+    }
+
+    fn installed_desktop() -> Option<String> {
+        for dir in desktop_search_dirs() {
+            for cand in DESKTOP_CANDIDATES {
+                if dir.join(cand).exists() {
+                    return Some(cand.to_string());
+                }
+            }
+        }
+        None
+    }
+
+    fn query_default() -> Option<String> {
+        Command::new("xdg-mime")
+            .args(["query", "default", MIME])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .filter(|s| !s.is_empty())
+    }
+
+    pub fn status() -> Vec<AssocStatus> {
+        let desktop = installed_desktop();
+        let current = query_default();
+        let is_default = desktop
+            .as_deref()
+            .zip(current.as_deref())
+            .map(|(d, c)| d == c)
+            .unwrap_or(false);
+        ASSOC_EXTS
+            .iter()
+            .map(|ext| AssocStatus {
+                ext: ext.to_string(),
+                registered: desktop.is_some(),
+                is_default,
+                current_handler: current
+                    .clone()
+                    .map(|s| s.trim_end_matches(".desktop").to_string()),
+            })
+            .collect()
+    }
+
+    pub fn set() -> Result<(), String> {
+        let desktop = installed_desktop().ok_or_else(|| {
+            "未找到已安装的桌面入口，请通过 deb/rpm 安装包安装后再关联".to_string()
+        })?;
+        let output = Command::new("xdg-mime")
+            .args(["default", &desktop, MIME])
+            .output()
+            .map_err(|e| format!("xdg-mime 执行失败: {e}"))?;
+        if !output.status.success() {
+            return Err(format!(
+                "xdg-mime 失败: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// 查询各扩展名的文件关联状态（设置页展示）
+#[tauri::command]
+fn association_status(app: tauri::AppHandle) -> Vec<AssocStatus> {
+    #[cfg(windows)]
+    {
+        let _ = &app;
+        return windows_assoc::status();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        return macos_assoc::status(&app.config().identifier);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = &app;
+        return linux_assoc::status();
+    }
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+    {
+        let _ = &app;
+        Vec::new()
+    }
+}
+
+/// 注册/设为默认：Windows 写 HKCU ProgID 并加入"打开方式"列表；
+/// macOS 直接调 LaunchServices 设为 UTI 默认；Linux 调 xdg-mime 写 mimeapps.list
+#[tauri::command]
+fn set_file_association(app: tauri::AppHandle, ext: String) -> Result<(), String> {
+    let _ = &ext;
+    #[cfg(windows)]
+    {
+        let _ = &app;
+        return windows_assoc::set(&ext);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        return macos_assoc::set(&app.config().identifier);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = &app;
+        return linux_assoc::set();
+    }
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+    {
+        Err("unsupported platform".to_string())
+    }
+}
+
+/// Windows：打开系统"默认应用"设置页（注册后设 UserChoice 默认项需用户在此选择）
+#[tauri::command]
+fn open_default_apps_settings() -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", "ms-settings:defaultapps"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .map_err(|e| format!("打开系统设置失败: {e}"))?;
+        return Ok(());
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(())
+    }
+}
+
 /// 前端主题切换时同步托盘图标深浅（dark=true 用白色图形）。
 #[tauri::command]
 fn set_tray_theme(app: tauri::AppHandle, dark: bool) -> Result<(), String> {
@@ -414,7 +810,10 @@ pub fn run() {
             add_allowed_path,
             set_tray_theme,
             read_data_file,
-            write_data_file
+            write_data_file,
+            association_status,
+            set_file_association,
+            open_default_apps_settings
         ])
         .setup(move |app| {
             #[cfg(windows)]

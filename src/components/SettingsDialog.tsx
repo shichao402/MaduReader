@@ -1,7 +1,13 @@
 import * as Dialog from '@radix-ui/react-dialog'
 import { X } from 'lucide-react'
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { getSettingsStore } from '../bridge'
+import {
+  getAssociationStatus,
+  openDefaultAppsSettings,
+  setFileAssociation,
+  type AssocStatus,
+} from '../lib/fileAssociations'
 import type { Settings } from '../stores/settings'
 
 interface SettingsDialogProps {
@@ -64,12 +70,62 @@ type Draft = Pick<
   | 'plantUmlServer'
   | 'proxyEnabled'
   | 'proxyServer'
+  | 'fileAssociations'
 >
 
 export default function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const settingsStore = getSettingsStore()
   const s = settingsStore.settings
   const [saveState, setSaveState] = useState<'idle' | 'saved' | 'error'>('idle')
+  const [assocStatus, setAssocStatus] = useState<AssocStatus[]>([])
+  const [assocError, setAssocError] = useState<string | null>(null)
+
+  const platform =
+    typeof navigator !== 'undefined' && /Mac/.test(navigator.platform) ? 'macos'
+    : /Win/.test(navigator.platform) ? 'windows'
+    : /Linux/.test(navigator.platform) ? 'linux'
+    : 'other'
+
+  const osHint =
+    platform === 'windows'
+      ? 'Windows 受系统保护，默认项需在「默认应用」中确认一次。'
+      : platform === 'macos'
+        ? 'macOS 上「设为默认」即时生效。'
+        : platform === 'linux'
+          ? 'Linux 需通过 deb/rpm 安装包安装后关联。'
+          : ''
+
+  const loadAssoc = useCallback(async () => {
+    try {
+      const status = await getAssociationStatus()
+      setAssocStatus(status)
+      setAssocError(null)
+    } catch (e) {
+      setAssocError(String(e))
+    }
+  }, [])
+
+  const [assocStatusVersion, setAssocStatusVersion] = useState(0)
+
+  // 弹窗打开且设置加载完成后拉取一次关联状态
+  useEffect(() => {
+    if (!open) return
+    if (!getSettingsStore().isLoaded) return
+    void loadAssoc()
+  }, [open, assocStatusVersion, loadAssoc])
+
+  async function handleAssociate(ext: string) {
+    setAssocError(null)
+    try {
+      await setFileAssociation(ext)
+      // Windows 的 OpenWithProgids 写入后立刻刷新状态；mac/linux 同步有延迟，稍候再查
+      window.setTimeout(() => {
+        void loadAssoc().then(() => setAssocStatusVersion((v) => v + 1))
+      }, platform === 'windows' ? 300 : 800)
+    } catch (e) {
+      setAssocError(String(e))
+    }
+  }
 
   const label = 'block text-sm text-[color:var(--color-text-primary)] mb-1.5'
   const input =
@@ -105,6 +161,7 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
         plantUmlServer: 'https://www.plantuml.com/plantuml',
         proxyEnabled: false,
         proxyServer: '',
+        fileAssociations: { md: false, markdown: false },
       })
     }
   }
@@ -154,6 +211,7 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
     plantUmlServer: s.plantUmlServer,
     proxyEnabled: s.proxyEnabled,
     proxyServer: s.proxyServer,
+    fileAssociations: s.fileAssociations,
   }
 
   return (
@@ -327,6 +385,75 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
                   />
                 </div>
               )}
+            </div>
+
+            <div className={section}>
+              <h3 className={sectionTitle}>文件关联</h3>
+              <p className="text-xs text-[color:var(--color-text-secondary)] mb-3">
+                将 .md / .markdown 文件交给 Ma读 打开。安装版已随安装自动注册；这里可重新注册、设为默认。
+              </p>
+              {assocError && (
+                <p className="text-xs text-red-500 mb-2">{assocError}</p>
+              )}
+              {assocStatus.length === 0 && !assocError && (
+                <p className="text-xs text-[color:var(--color-text-secondary)]">
+                  当前环境不支持（Web 预览）。
+                </p>
+              )}
+              {assocStatus.map((item) => (
+                <div
+                  key={item.ext}
+                  className="flex items-center justify-between gap-3 py-2 border-b border-[color:var(--color-border-base)] last:border-b-0"
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm text-[color:var(--color-text-primary)]">
+                      .{item.ext}
+                    </div>
+                    <div className="text-xs text-[color:var(--color-text-secondary)] truncate">
+                      {item.isDefault
+                        ? '已是默认打开方式'
+                        : item.registered
+                          ? `已注册，当前默认：${item.currentHandler ?? '未知'}`
+                          : '未注册'}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {item.isDefault ? (
+                      <span className="text-xs text-[color:var(--color-primary)]">✓ 默认</span>
+                    ) : (
+                      <>
+                        {!item.registered && (
+                          <button
+                            className="px-3 py-1.5 text-xs rounded-md bg-[color:var(--color-bg-secondary)] border border-[color:var(--color-border-base)] text-[color:var(--color-text-primary)] hover:bg-[color:var(--color-bg-hover)] transition-colors"
+                            onClick={() => handleAssociate(item.ext)}
+                          >
+                            注册
+                          </button>
+                        )}
+                        <button
+                          className="px-3 py-1.5 text-xs rounded-md bg-[color:var(--color-primary)] text-white hover:bg-[color:var(--color-primary-hover)] transition-colors"
+                          onClick={() => handleAssociate(item.ext)}
+                        >
+                          设为默认
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+              <div className="flex items-center justify-between mt-3">
+                <span className="text-xs text-[color:var(--color-text-secondary)]">
+                  {osHint}
+                </span>
+                {platform === 'windows' && (
+                  <button
+                    className="px-3 py-1.5 text-xs rounded-md bg-[color:var(--color-bg-secondary)] border border-[color:var(--color-border-base)] text-[color:var(--color-text-primary)] hover:bg-[color:var(--color-bg-hover)] transition-colors"
+                    onClick={() => void openDefaultAppsSettings()}
+                  >
+                    打开系统「默认应用」设置
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="flex flex-wrap gap-3 pt-5 border-t border-[color:var(--color-border-base)]">

@@ -27,6 +27,10 @@ export interface Settings {
   proxyEnabled: boolean
   proxyServer: string
   windowMaterial: 'off' | 'mica' | 'acrylic'
+  fileAssociations: {
+    md: boolean
+    markdown: boolean
+  }
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -51,6 +55,10 @@ export const DEFAULT_SETTINGS: Settings = {
   proxyEnabled: false,
   proxyServer: '',
   windowMaterial: 'mica',
+  fileAssociations: {
+    md: false,
+    markdown: false,
+  },
 }
 
 const STORAGE_KEY = 'madureader-settings'
