@@ -132,9 +132,9 @@ describe('TabStore - Direct Coverage', () => {
       const newTab = await store.newTab()
       await store.closeTab(newTab.id)
       
-      // Should create a new empty tab
-      expect(store.tabs.length).toBe(1)
-      expect(store.activeTabId).toBeDefined()
+      // 只读阅读器：关闭最后一个文件后回到空态，不再自动新建文档
+      expect(store.tabs.length).toBe(0)
+      expect(store.activeTabId).toBeNull()
     })
 
     it('should handle closing tab while on different tab', async () => {
@@ -152,14 +152,14 @@ describe('TabStore - Direct Coverage', () => {
     it('should handle closing all tabs', async () => {
       const tab1 = await store.newTab()
       const tab2 = await store.newTab()
-      
+
       // Close all tabs
       await store.closeTab(tab1.id)
       await store.closeTab(tab2.id)
-      
-      // Should create a new empty tab
-      expect(store.tabs.length).toBe(1)
-      expect(store.activeTabId).toBeDefined()
+
+      // 只读阅读器：全部关闭后回到空态，不再自动新建文档
+      expect(store.tabs.length).toBe(0)
+      expect(store.activeTabId).toBeNull()
     })
 
     it('should handle closing non-existent tab gracefully', async () => {

@@ -1,22 +1,17 @@
 import { cn } from '../lib/utils'
-import { Settings } from 'lucide-react'
 
 export default function SidebarIconBar({
   sidebarPosition,
   isDark,
   onSetView,
-  onOpenSettings,
   onToggleTheme,
-  onNewTab,
   onRefreshTree,
   onExpand,
 }: {
   sidebarPosition: 'left' | 'right'
   isDark: boolean
   onSetView: (view: 'tree' | 'tabs') => void
-  onOpenSettings: () => void
   onToggleTheme: () => void
-  onNewTab: () => void
   onRefreshTree: () => void
   onExpand: () => void
 }) {
@@ -35,17 +30,11 @@ export default function SidebarIconBar({
       <button className={btn} title="目录树" onClick={() => onSetView('tree')}>
         <FolderIcon />
       </button>
-      <button className={btn} title="页签" onClick={() => onSetView('tabs')}>
+      <button className={btn} title="打开的文件" onClick={() => onSetView('tabs')}>
         <TabsIcon />
-      </button>
-      <button className={btn} title="设置" onClick={onOpenSettings}>
-        <Settings size={16} />
       </button>
       <button className={btn} title="切换主题" onClick={onToggleTheme}>
         {isDark ? <SunIcon /> : <MoonIcon />}
-      </button>
-      <button className={btn} title="新建页签" onClick={onNewTab}>
-        <PlusIcon />
       </button>
       <button className={btn} title="刷新文件树" onClick={onRefreshTree}>
         <RefreshIcon />
@@ -84,13 +73,6 @@ function MoonIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
-    </svg>
-  )
-}
-function PlusIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M12 5v14M5 12h14" />
     </svg>
   )
 }

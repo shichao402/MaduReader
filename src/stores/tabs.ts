@@ -186,6 +186,8 @@ class TabStore {
       // 设置工作目录
       if (!this._workingDirectory) {
         this._workingDirectory = getDirName(normalizedPath)
+        // 首次确定工作目录后立即构建文件树，否则目录面板会一直是空的
+        await this.refreshFileTree()
       }
       this.emit()
     } catch (e) {
@@ -228,11 +230,6 @@ class TabStore {
       }
     }
     this.emit()
-
-    await Promise.resolve()
-    if (this._tabs.length === 0) {
-      this.newTab()
-    }
   }
 
   setActiveTab(id: string): void {

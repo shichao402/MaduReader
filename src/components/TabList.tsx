@@ -1,4 +1,4 @@
-import { X, Plus, FileText } from 'lucide-react'
+import { X, FileText } from 'lucide-react'
 import { cn } from '../lib/utils'
 
 export interface Tab {
@@ -15,7 +15,6 @@ interface TabListProps {
   activeTabId: string | null
   onCloseTab: (id: string) => void
   onSetActive: (id: string) => void
-  onNewTab: () => void
 }
 
 export default function TabList({
@@ -23,7 +22,6 @@ export default function TabList({
   activeTabId,
   onCloseTab,
   onSetActive,
-  onNewTab,
 }: TabListProps) {
   return (
     <div className="flex flex-col gap-1 py-2 max-h-full overflow-y-auto">
@@ -69,13 +67,11 @@ export default function TabList({
           </button>
         </div>
       ))}
-      <button
-        className="flex items-center justify-center gap-1 py-2 text-[color:var(--color-text-secondary)] border-t border-[color:var(--color-border-base)] mt-1 hover:bg-[color:var(--color-sidebar-hover)] hover:text-[color:var(--color-primary)] transition-colors"
-        onClick={onNewTab}
-        title="新建页签"
-      >
-        <Plus size={15} />
-      </button>
+      {tabs.length === 0 && (
+        <p className="px-3 py-6 text-xs text-center text-[color:var(--color-text-tertiary)]">
+          尚未打开文件，可从目录中选择
+        </p>
+      )}
     </div>
   )
 }

@@ -102,6 +102,7 @@ export default function App() {
   const [sidebarPosition, setSidebarPosition] = useState<'left' | 'right'>('left')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [sidebarView, setSidebarView] = useState<'tree' | 'tabs' | 'outline'>('outline')
 
   // 初始化
   useEffect(() => {
@@ -220,9 +221,7 @@ export default function App() {
             tabStore.setSidebarView(view)
             toggleSidebar()
           }}
-          onOpenSettings={() => setSettingsOpen(true)}
           onToggleTheme={() => settingsStore.toggleTheme()}
-          onNewTab={() => tabStore.newTab()}
           onRefreshTree={() => tabStore.refreshFileTree()}
           onExpand={toggleSidebar}
         />
@@ -232,14 +231,14 @@ export default function App() {
           style={{ order: sidebarPosition === 'right' ? 2 : 0 }}
         >
           <Sidebar
-            view={tabStore.sidebarView}
+            view={sidebarView}
             fileTree={tabStore.fileTree}
             tabs={tabStore.tabs}
             activeTabId={tabStore.activeTabId}
             activePath={tabStore.tabs.find((t) => t.id === tabStore.activeTabId)?.path ?? null}
             workingDirectory={tabStore.workingDirectory}
             sidebarPosition={sidebarPosition}
-            onViewChange={(view) => tabStore.setSidebarView(view)}
+            onViewChange={setSidebarView}
             onCollapse={toggleSidebar}
             onTogglePosition={toggleSidebarPosition}
             onRefreshTree={() => tabStore.refreshFileTree()}
@@ -247,8 +246,6 @@ export default function App() {
             onToggleNode={(path) => tabStore.toggleFileNode(path)}
             onCloseTab={(id) => tabStore.closeTab(id)}
             onSetActiveTab={(id) => tabStore.setActiveTab(id)}
-            onNewTab={() => tabStore.newTab()}
-            onOpenSettings={() => setSettingsOpen(true)}
           />
         </div>
       )}

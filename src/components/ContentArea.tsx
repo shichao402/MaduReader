@@ -172,6 +172,7 @@ export default function ContentArea({
   }, [tabStore.activeTabId])
 
   // 命令面板事件总线：open file / find / export / slideshow / scroll-to-heading
+  // 注意：派发端（CommandPalette 等）统一 dispatch 到 window，这里必须在 window 上监听才能收到。
   useEffect(() => {
     const onOpenFile = () => void openFile()
     const onFind = () => findText()
@@ -183,16 +184,51 @@ export default function ContentArea({
       const headings = Array.from(
         contentRef.current.querySelectorAll('h1, h2, h3, h4, h5, h6'),
       )
-      const target =
-        headings.find((h) => h.textContent === detail.text) ?? headings[detail.index]
-      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      // 优先按"就近锚点"匹配：markdown-it 会为标题生成 id，与源文件锚点写法一致
+      const slug = detail.text
+        ? detail.text
+            .trim()
+            .toLowerCase()
+            .replace(/[\s.,/!"#$%&'()*+，。：:;<=>?@\[\]^`{|}~·—…、“”‘’？？！（）【】]/g, '-')
+            .replace(/-+/g, '-')
+            .replace(/^-|-$/g, '')
+        : ''
+      let target: Element | undefined
+      if (slug) {
+        const anchor = contentRef.current.querySelector(`[id="${slug}"]`)
+        target =
+          anchor ??
+          headings.find(
+            (h) =>
+              h.id === slug ||
+              h.textContent === detail.text ||
+              h.querySelector(`a[href="#${slug}"]`) !== null,
+          )
+      }
+      target = target ?? headings.find((h) => h.textContent === detail.text) ?? headings[detail.index]
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      } else {
+        // 找不到目标标题时回退到文档顶部，保证点击有反馈
+        containerRef.current?.scrollTo({ top: 0, behavior: 'smooth' as ScrollBehavior })
+      }
     }
+    window.addEventListener('trigger-open-file', onOpenFile)
+    window.addEventListener('trigger-find', onFind)
+    window.addEventListener('trigger-export', onExport)
+    window.addEventListener('trigger-slideshow', onSlideshow)
+    window.addEventListener('scroll-to-heading', onScrollHeading)
     document.addEventListener('trigger-open-file', onOpenFile)
     document.addEventListener('trigger-find', onFind)
     document.addEventListener('trigger-export', onExport)
     document.addEventListener('trigger-slideshow', onSlideshow)
     document.addEventListener('scroll-to-heading', onScrollHeading)
     return () => {
+      window.removeEventListener('trigger-open-file', onOpenFile)
+      window.removeEventListener('trigger-find', onFind)
+      window.removeEventListener('trigger-export', onExport)
+      window.removeEventListener('trigger-slideshow', onSlideshow)
+      window.removeEventListener('scroll-to-heading', onScrollHeading)
       document.removeEventListener('trigger-open-file', onOpenFile)
       document.removeEventListener('trigger-find', onFind)
       document.removeEventListener('trigger-export', onExport)

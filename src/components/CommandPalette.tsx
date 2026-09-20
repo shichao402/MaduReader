@@ -20,6 +20,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { useStores } from '../hooks/useStores'
+import { extractHeadings } from './Sidebar'
 import type { FileNode } from './FileTree'
 import { cn } from '../lib/utils'
 
@@ -41,23 +42,6 @@ function flattenFiles(nodes: FileNode[], out: FileNode[] = []): FileNode[] {
     else out.push(node)
   }
   return out
-}
-
-function extractHeadings(source: string): { level: number; text: string }[] {
-  const headings: { level: number; text: string }[] = []
-  let inFence = false
-  for (const line of source.split(/\r?\n/)) {
-    const fence = line.match(/^\s*(`{3,}|~{3,})/)
-    if (fence) {
-      inFence = !inFence
-      continue
-    }
-    if (!inFence) {
-      const m = line.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/)
-      if (m) headings.push({ level: m[1].length, text: m[2] })
-    }
-  }
-  return headings
 }
 
 function fileIcon(name: string): LucideIcon {
