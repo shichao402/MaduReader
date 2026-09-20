@@ -183,6 +183,9 @@ class SettingsStore {
     const root = document.documentElement
     root.classList.toggle('dark', this.isDark)
     root.classList.toggle('light', !this.isDark)
+    if (isTauriRuntime()) {
+      void invoke('set_tray_theme', { dark: this.isDark }).catch(() => {})
+    }
   }
 
   async applyWindowMaterial(): Promise<void> {
