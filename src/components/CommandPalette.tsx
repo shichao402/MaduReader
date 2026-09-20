@@ -39,7 +39,7 @@ const SECTION_ORDER: CommandItem['section'][] = ['文件', '大纲', '命令']
 function flattenFiles(nodes: FileNode[], out: FileNode[] = []): FileNode[] {
   for (const node of nodes) {
     if (node.isDir) flattenFiles(node.children || [], out)
-    else out.push(node)
+    else if (/\.md$/i.test(node.name) || /\.markdown$/i.test(node.name)) out.push(node)
   }
   return out
 }

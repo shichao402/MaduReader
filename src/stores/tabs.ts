@@ -158,8 +158,8 @@ class TabStore {
       if (this._virtualFiles.has(normalizedPath)) {
         content = this._virtualFiles.get(normalizedPath) || ''
       } else {
-        const fs = await import('@tauri-apps/plugin-fs')
-        content = await fs.readTextFile(path)
+        const { allowAndReadTextFile } = await import('../lib/fsAccess')
+        content = await allowAndReadTextFile(path)
       }
       const name = getBaseName(normalizedPath)
 
@@ -274,7 +274,7 @@ class TabStore {
       this._fileTree =
         this._virtualFiles.size > 0
           ? this.buildVirtualFileTree(this._workingDirectory)
-          : await this.buildFileTree(this._workingDirectory)
+          : pruneNonMarkdownNodes(await this.buildFileTree(this._workingDirectory))
       this.emit()
     } catch (e) {
       console.error('[Tabs] Failed to refresh file tree:', e)
@@ -282,14 +282,14 @@ class TabStore {
   }
 
   async buildFileTree(dir = this._workingDirectory, depth = 0): Promise<FileNode[]> {
-    const fs = await import('@tauri-apps/plugin-fs')
+    const { allowAndReadDir } = await import('../lib/fsAccess')
     const nodes: FileNode[] = []
 
     if (!dir || depth > 10) return nodes
 
     let entries: Array<{ name: string; isDirectory: boolean }> = []
     try {
-      entries = (await fs.readDir(dir)) || []
+      entries = (await allowAndReadDir(dir)) || []
     } catch (e) {
       console.error('[Tabs] Failed to read directory:', e)
       return nodes
@@ -416,6 +416,25 @@ class TabStore {
     if (!path.endsWith('.md')) return
     this.openFile(path).catch(console.error)
   }
+}
+
+/** 判断文件名是否为本阅读器支持的 Markdown 文件 */
+function isMarkdownFile(name: string): boolean {
+  return /\.md$/i.test(name) || /\.markdown$/i.test(name)
+}
+
+/** 递归剪枝：目录无任何 Markdown 后代（含自身 md 文件）则整棵剔除 */
+export function pruneNonMarkdownNodes(nodes: FileNode[]): FileNode[] {
+  const result: FileNode[] = []
+  for (const node of nodes) {
+    if (!node.isDir) {
+      if (isMarkdownFile(node.name)) result.push(node)
+      continue
+    }
+    node.children = pruneNonMarkdownNodes(node.children || [])
+    if (node.children.length > 0) result.push(node)
+  }
+  return result
 }
 
 export const tabStore = new TabStore()

@@ -21,6 +21,25 @@ fn app_data_dir() -> Result<String, String> {
         .ok_or_else(|| "Could not resolve app data directory".to_string())
 }
 
+/// 将用户显式授权的路径（目录或文件）加入 fs 读取作用域。
+/// 目录递归放行，覆盖所有层级的子目录与文件。
+/// 仅可由前端在用户通过对话框选择或拖拽文件后调用，不做无差别的全盘授权。
+#[tauri::command]
+fn add_allowed_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    use tauri_plugin_fs::FsExt as _;
+    let p = std::path::PathBuf::from(&path);
+    if !p.exists() {
+        return Err(format!("path does not exist: {path}"));
+    }
+    let scope = app.fs_scope();
+    let result = if p.is_dir() {
+        scope.allow_directory(&p, true)
+    } else {
+        scope.allow_file(&p)
+    };
+    result.map_err(|e| format!("failed to allow path: {e}"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -40,7 +59,7 @@ pub fn run() {
                 .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne)
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![get_args, app_data_dir])
+        .invoke_handler(tauri::generate_handler![get_args, app_data_dir, add_allowed_path])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

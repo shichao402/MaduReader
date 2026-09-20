@@ -282,8 +282,8 @@ export default function ContentArea({
     const dir = path as string
     tabStore.setWorkingDirectory(dir)
     try {
-      const fs = await import('@tauri-apps/plugin-fs')
-      const files = await fs.readDir(dir)
+      const { allowAndReadDir } = await import('../lib/fsAccess')
+      const files = await allowAndReadDir(dir)
       const mdFiles = files.filter((f: { name: string }) =>
         f.name.toLowerCase().endsWith('.md'),
       )

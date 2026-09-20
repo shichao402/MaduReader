@@ -155,17 +155,11 @@ export default function App() {
             const args = await invoke<string[]>('get_args')
             if (args && args.length > 0 && args[0]) {
               const path = args[0]
-              const fs = await import('@tauri-apps/plugin-fs')
-              let isDir = false
-              try {
-                await fs.readDir(path)
-                isDir = true
-              } catch {
-                isDir = false
-              }
+              const { allowAndReadDir, allowPath, isDirectory } = await import('./lib/fsAccess')
+              const isDir = await isDirectory(path)
               if (isDir) {
                 tabStore.setWorkingDirectory(path)
-                const files = await fs.readDir(path)
+                const files = await allowAndReadDir(path)
                 const mdFiles = files.filter((f: { name: string }) => f.name.endsWith('.md'))
                 if (mdFiles.length > 0) {
                   const readme = mdFiles.find(
@@ -173,11 +167,12 @@ export default function App() {
                   )
                   const target = readme || mdFiles[0]
                   const fullPath = path.endsWith('/')
-                    ? `${path}${target.name}`
+                    ? `${path}/${target.name}`
                     : `${path}/${target.name}`
                   await tabStore.openFile(fullPath)
                 }
               } else {
+                await allowPath(path)
                 await tabStore.openFile(path)
                 const lastSlash = path.lastIndexOf('/')
                 tabStore.setWorkingDirectory(lastSlash > 0 ? path.substring(0, lastSlash) : '')
@@ -243,18 +238,17 @@ export default function App() {
 
   async function handleDroppedPaths(paths: string[]) {
     const tabStore = getTabStore()
-    const fs = await import('@tauri-apps/plugin-fs')
+    const { allowAndReadDir, allowPath, isDirectory } = await import('./lib/fsAccess')
     // 目录：设为工作目录并构建文件树，打开第一个 md
     let isDir = false
     try {
-      await fs.readDir(paths[0])
-      isDir = true
+      isDir = await isDirectory(paths[0])
     } catch {
       isDir = false
     }
     if (isDir) {
       tabStore.setWorkingDirectory(paths[0])
-      const files = await fs.readDir(paths[0])
+      const files = await allowAndReadDir(paths[0])
       const mdFiles = files.filter((f: { name: string }) =>
         f.name.toLowerCase().endsWith('.md'),
       )
@@ -273,6 +267,7 @@ export default function App() {
     }
     // 文件：打开第一个 .md，同时把它所在目录设为工作目录
     const mdPath = paths.find((p) => p.toLowerCase().endsWith('.md')) || paths[0]
+    await allowPath(mdPath)
     await tabStore.openFile(mdPath)
     const parentDir = mdPath.replace(/[\\/][^\\/]+$/, '')
     if (parentDir && parentDir !== mdPath) {
