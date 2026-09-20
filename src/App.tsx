@@ -234,6 +234,18 @@ export default function App() {
         }
       } catch (e) {
         console.error('[MaduReader] init error:', e)
+      } finally {
+        if (isTauri) {
+          // 常驻唤醒时 Rust 侧保持窗口隐藏等本信号：等两帧确保画面已绘制再上报，
+          // 窗口显示瞬间就是完整渲染内容，无白屏/半渲染外露
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => {
+              void import('@tauri-apps/api/core').then(({ invoke }) =>
+                invoke('app_ready').catch(() => {}),
+              )
+            }),
+          )
+        }
       }
     }
     init()

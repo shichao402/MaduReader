@@ -12,11 +12,13 @@ const TRAY_DARK: &[u8] = include_bytes!("../icons/tray-dark.png");
 const TRAY_LIGHT: &[u8] = include_bytes!("../icons/tray-light.png");
 
 /// 常驻 + 快速唤醒协议：
-/// - 点 X 关窗（或 Alt+F4）→ 仅隐藏窗口，进程与 WebView2 环境常驻；500ms（前端会话防抖落盘窗口）
-///   后把 WebView 导航到 about:blank，DOM/JS 堆整体释放。是否驻留由设置项 closeToTray 控制。
+/// - 点 X 关窗（或 Alt+F4）→ 窗口立即隐藏（体感即关），进程与 WebView2 环境常驻；500ms
+///   （前端会话落盘窗口）后把 WebView 导航到 about:blank，DOM/JS 堆整体释放。
+///   是否驻留由设置项 closeToTray 控制。
 /// - 再次启动 exe / 双击 md → single-instance 把参数转发给常驻进程后本进程立即退出，常驻进程
 ///   导航回应用页面，前端 init 通过 get_pending_open 拿到路径直接打开。
-/// - 托盘左键 / "显示主窗口" → 若内容已卸载则先导航回来，前端走会话恢复。
+/// - 托盘左键 / "显示主窗口" → 内容已卸载则先导航回来，暂不显示窗口；等前端 init 完成、
+///   画面绘制后上报 app_ready 再显示（超时兜底强制显示），避免白屏/半渲染画面外露。
 const BLANK_URL: &str = "about:blank";
 /// 与前端会话防抖间隔（500ms）一致，保证隐藏前 session.json 已落盘
 const SESSION_SETTLE_MS: u64 = 500;
@@ -25,6 +27,8 @@ const SESSION_SETTLE_MS: u64 = 500;
 struct ResidentInner {
     /// WebView 内容是否已卸载（隐藏 + about:blank），唤醒时据此决定是否导航回来
     unloaded: bool,
+    /// 唤醒时窗口处于隐藏等待状态：app_ready 上报后再显示，超时兜底
+    pending_show: bool,
     /// 应用页面前端 URL（dev 为 devUrl、release 为应用协议地址），唤醒导航用
     app_url: String,
     /// single-instance 转发的待打开路径，页面导航回来后由前端 init 消费（consume-once）
@@ -40,6 +44,7 @@ impl ResidentInner {
     fn new() -> Self {
         Self {
             unloaded: false,
+            pending_show: false,
             app_url: String::new(),
             pending_open: None,
             args_consumed: false,
@@ -80,7 +85,6 @@ fn close_to_tray_enabled() -> bool {
 fn focus_main_window(app: &tauri::AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.unminimize();
-        let _ = win.show();
         let _ = win.set_focus();
     }
 }
@@ -97,20 +101,20 @@ fn emit_open_path(app: &tauri::AppHandle, path: &str) {
 
 /// 唤醒主窗口：若 WebView 内容已卸载（about:blank），先导航回应用页面再聚焦。
 /// 页面重新加载后前端 init 会自行调用 get_pending_open 处理待打开路径或会话恢复。
+/// 已卸载时窗口保持隐藏，等前端绘制完成后上报 app_ready 再显示（1s 超时兜底），
+/// 避免白屏/半渲染画面外露（画面撕裂感）。
 fn resume_main_window(app: &tauri::AppHandle) {
+    let mut wait_ready = false;
     if let Some(state) = app.try_state::<ResidentState>() {
         let app_url = state.with_inner(|inner| {
             if inner.unloaded {
                 inner.unloaded = false;
+                inner.pending_show = true;
+                wait_ready = true;
             }
             inner.app_url.clone()
         });
         if let Some(win) = app.get_webview_window("main") {
-            let was_unloaded = app
-                .try_state::<ResidentState>()
-                .map(|_| true)
-                .unwrap_or(false);
-            let _ = was_unloaded;
             match app_url.parse::<tauri::Url>() {
                 Ok(url) => {
                     let _ = win.navigate(url);
@@ -121,8 +125,55 @@ fn resume_main_window(app: &tauri::AppHandle) {
                 }
             }
         }
+        if wait_ready {
+            let handle = app.clone();
+            std::thread::spawn(move || {
+                for _ in 0..20 {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    let still_waiting = handle
+                        .try_state::<ResidentState>()
+                        .map(|s| s.with_inner(|inner| inner.pending_show))
+                        .unwrap_or(false);
+                    if !still_waiting {
+                        return;
+                    }
+                }
+                // 超时兜底：前端迟迟未上报（如异常），强制显示避免窗口"消失"
+                handle
+                    .try_state::<ResidentState>()
+                    .map(|s| s.with_inner(|inner| inner.pending_show = false));
+                focus_main_window(&handle);
+                if let Some(win) = handle.get_webview_window("main") {
+                    let _ = win.show();
+                }
+                log::warn!("[resident] app_ready timeout, force show window");
+            });
+        }
     }
     focus_main_window(app);
+}
+
+/// 前端 init 完成、首帧绘制后调用：若窗口正等待显示，则显示并聚焦。
+#[tauri::command]
+fn app_ready(app: tauri::AppHandle) {
+    if let Some(state) = app.try_state::<ResidentState>() {
+        let should_show = state.with_inner(|inner| {
+            if inner.pending_show {
+                inner.pending_show = false;
+                true
+            } else {
+                false
+            }
+        });
+        if should_show {
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.unminimize();
+                let _ = win.show();
+                let _ = win.set_focus();
+            }
+            log::info!("[resident] app_ready, window shown");
+        }
+    }
 }
 
 #[tauri::command]
@@ -313,6 +364,12 @@ pub fn run() {
                 if let (Some(state), Some(path)) = (app.try_state::<ResidentState>(), target.as_ref()) {
                     state.with_inner(|inner| inner.pending_open = Some(path.clone()));
                 }
+                // 窗口此刻是隐藏的，显示动作交给 resume_main_window 的 app_ready 流程
+            } else {
+                // 内容未卸载、窗口可见：直接置顶显示（focus_main_window 走 unminimize+set_focus）
+                if let Some(win) = app.get_webview_window("main") {
+                    let _ = win.show();
+                }
             }
             resume_main_window(app);
             // 内容未卸载：前端已在运行，直接推事件打开文件（不置 pending，避免残留污染下次唤醒）
@@ -352,6 +409,7 @@ pub fn run() {
             get_args,
             get_pending_open,
             set_app_url,
+            app_ready,
             app_data_dir,
             add_allowed_path,
             set_tray_theme,
@@ -410,8 +468,8 @@ pub fn run() {
                     .build(app)?;
             }
 
-            // 常驻核心：拦截点 X 关闭。closeToTray 开启时只隐藏窗口并卸载 WebView 内容；
-            // 关闭前先通知前端立即落盘会话（不等 500ms 防抖）。
+            // 常驻核心：拦截点 X 关闭。closeToTray 开启时立即隐藏窗口（体感即关），
+            // 隐藏后通知前端落盘会话，500ms 后卸载 WebView 内容（导航到 about:blank）。
             if let Some(win) = app.get_webview_window("main") {
                 let win_for_flush = win.clone();
                 let win_for_hide = win.clone();
@@ -421,15 +479,17 @@ pub fn run() {
                             return;
                         }
                         api.prevent_close();
-                        // 通知前端立即落盘会话
+                        // 立即隐藏：用户点 X 的那一刻窗口就消失，体感与"关闭"一致
+                        let _ = win_for_hide.hide();
+                        // 窗口已隐藏，此刻通知前端立即落盘会话
                         let _ = win_for_flush.eval(
                             "window.dispatchEvent(new CustomEvent('madu:hide-before-close'))",
                         );
                         let hide_win = win_for_hide.clone();
                         std::thread::spawn(move || {
-                            // 给前端写入 session.json 留出落盘窗口
+                            // 给前端写入 session.json 留出落盘窗口（窗口已隐藏，无感知）
                             std::thread::sleep(std::time::Duration::from_millis(SESSION_SETTLE_MS));
-                            // 等待窗口内发生二次启动：放弃隐藏/卸载，保持窗口可见
+                            // 等待窗口内发生二次启动：放弃卸载，保持窗口可见
                             let cancelled = hide_win
                                 .app_handle()
                                 .try_state::<ResidentState>()
@@ -441,7 +501,6 @@ pub fn run() {
                                 log::info!("[resident] close cancelled by relaunch, window stays visible");
                                 return;
                             }
-                            let _ = hide_win.hide();
                             // 内容卸载：导航到空白页，释放 DOM/JS 堆；唤醒时导航回来重新初始化
                             if let Ok(blank) = tauri::Url::parse(BLANK_URL) {
                                 let _ = hide_win.navigate(blank);
