@@ -1,5 +1,7 @@
 import MarkdownIt from 'markdown-it'
-import hljs from 'highlight.js'
+// 只注册常用语言的 highlight.js（lib/common，约 40 种），显著小于全语言包；
+// 未注册的语言会回退为纯文本代码块展示
+import hljs from 'highlight.js/lib/common'
 import markdownItTaskLists from 'markdown-it-task-lists'
 import markdownItFootnote from 'markdown-it-footnote'
 import markdownItSub from 'markdown-it-sub'
@@ -79,12 +81,12 @@ export function getMarkdownInstance(): InstanceType<typeof MarkdownIt> {
   return mdInstance
 }
 
-export function renderMarkdown(source: string): string {
+export async function renderMarkdownAsync(source: string): Promise<string> {
   const md = getMarkdownInstance()
   let html = md.render(source)
   
-  // 处理 KaTeX 数学公式
-  html = processKatex(html)
+  // 处理 KaTeX 数学公式（katex 按需动态加载；无公式内容在内部短路返回，不触发加载）
+  html = await processKatex(html)
   
   // 添加图片懒加载
   html = html.replace(/<img([^>]*)>/gi, (_: string, attrs: string) => {

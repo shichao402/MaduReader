@@ -4,6 +4,9 @@ import App from './App'
 import './styles/main.css'
 import './styles/tokens.css'
 import { getTabStore, getSettingsStore } from './bridge'
+import { perfLog } from './lib/perfLog'
+
+const t0 = performance.now()
 
 console.log('[MaduReader] main.tsx loaded')
 
@@ -44,6 +47,8 @@ createRoot(document.getElementById('root')!).render(
   </StrictMode>,
 )
 
+void perfLog(`frontend: react render() called at +${(performance.now() - t0).toFixed(0)}ms`)
+
 console.log('[MaduReader] stores ready:', !!getTabStore(), !!getSettingsStore())
 
 // 挂载成功后让 React App 自己恢复标题
@@ -52,5 +57,6 @@ requestAnimationFrame(() => {
     if (document.title.includes('[booting') || document.title.includes('[JS ERROR') || document.title.includes('[PROMISE')) {
       document.title = 'Ma读'
     }
+    void perfLog(`frontend: first paint (double rAF) at +${(performance.now() - t0).toFixed(0)}ms`)
   })
 })

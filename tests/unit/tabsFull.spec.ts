@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // Mock dependencies
 vi.mock('@/composables/useMarkdown', () => ({
   useMarkdown: vi.fn(() => ({
-    renderMarkdown: vi.fn(),
+    renderMarkdownAsync: vi.fn(),
     getMarkdownInstance: vi.fn(),
   })),
 }))

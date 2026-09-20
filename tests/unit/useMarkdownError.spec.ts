@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderMarkdown, renderMermaid, initCodeCopy } from '../../src/composables/useMarkdown'
+import { renderMarkdownAsync, renderMermaid, initCodeCopy } from '../../src/composables/useMarkdown'
 
 describe('useMarkdown - Error Handling Coverage', () => {
   let mockClipboard: {
@@ -21,50 +21,50 @@ describe('useMarkdown - Error Handling Coverage', () => {
     })
   })
 
-  describe('renderMarkdown - Highlight Error Handling', () => {
-    it('should catch highlight error for invalid language', () => {
+  describe('renderMarkdownAsync - Highlight Error Handling', () => {
+    it('should catch highlight error for invalid language', async () => {
       // This will trigger the catch block for highlight
       const markdown = '```invalidlang12345\nconst x = 1;\n```'
-      const html = renderMarkdown(markdown)
+      const html = await renderMarkdownAsync(markdown)
       
       // Should still produce valid HTML
       expect(html).toContain('<pre')
       expect(html).toContain('const x = 1')
     })
 
-    it('should handle code block with special characters', () => {
+    it('should handle code block with special characters', async () => {
       const markdown = '```javascript\nconst x = "test\";\n```'
-      const html = renderMarkdown(markdown)
+      const html = await renderMarkdownAsync(markdown)
       
       expect(html).toContain('<pre')
     })
 
-    it('should handle code block with unicode', () => {
+    it('should handle code block with unicode', async () => {
       const markdown = '```python\nprint("你好世界")\n```'
-      const html = renderMarkdown(markdown)
+      const html = await renderMarkdownAsync(markdown)
       
       expect(html).toContain('<pre')
       expect(html).toContain('你好世界')
     })
 
-    it('should handle code block with escaped characters', () => {
+    it('should handle code block with escaped characters', async () => {
       const markdown = '```bash\necho "test\\nvalue"\n```'
-      const html = renderMarkdown(markdown)
+      const html = await renderMarkdownAsync(markdown)
       
       expect(html).toContain('<pre')
     })
 
-    it('should handle code block with very long content', () => {
+    it('should handle code block with very long content', async () => {
       const longCode = 'const x = '.repeat(100)
       const markdown = `\`\`\`javascript\n${longCode}\n\`\`\``
-      const html = renderMarkdown(markdown)
+      const html = await renderMarkdownAsync(markdown)
       
       expect(html).toContain('<pre')
     })
   })
 
-  describe('renderMarkdown - InitCodeCopy Coverage', () => {
-    it('should handle code copy button click', () => {
+  describe('renderMarkdownAsync - InitCodeCopy Coverage', () => {
+    it('should handle code copy button click', async () => {
       // Create a copy button
       const button = document.createElement('button')
       button.className = 'copy-btn'
@@ -85,7 +85,7 @@ describe('useMarkdown - Error Handling Coverage', () => {
       })
     })
 
-    it('should handle code copy with empty code', () => {
+    it('should handle code copy with empty code', async () => {
       const button = document.createElement('button')
       button.className = 'copy-btn'
       button.setAttribute('data-code', '')
@@ -102,7 +102,7 @@ describe('useMarkdown - Error Handling Coverage', () => {
       })
     })
 
-    it('should handle code copy with special characters', () => {
+    it('should handle code copy with special characters', async () => {
       const button = document.createElement('button')
       button.className = 'copy-btn'
       button.setAttribute('data-code', 'const x = "test\";')
@@ -119,7 +119,7 @@ describe('useMarkdown - Error Handling Coverage', () => {
       })
     })
 
-    it('should not error on non-copy-btn clicks', () => {
+    it('should not error on non-copy-btn clicks', async () => {
       const button = document.createElement('button')
       button.className = 'other-btn'
       document.body.appendChild(button)
@@ -131,7 +131,7 @@ describe('useMarkdown - Error Handling Coverage', () => {
       expect(true).toBe(true)
     })
 
-    it('should handle multiple copy buttons', () => {
+    it('should handle multiple copy buttons', async () => {
       for (let i = 0; i < 3; i++) {
         const button = document.createElement('button')
         button.className = 'copy-btn'
@@ -155,123 +155,123 @@ describe('useMarkdown - Error Handling Coverage', () => {
     })
   })
 
-  describe('renderMarkdown - Edge Cases', () => {
-    it('should handle markdown with only whitespace', () => {
+  describe('renderMarkdownAsync - Edge Cases', () => {
+    it('should handle markdown with only whitespace', async () => {
       const markdown = '   \n\n   '
-      const html = renderMarkdown(markdown)
+      const html = await renderMarkdownAsync(markdown)
       
       expect(html).toBeDefined()
     })
 
-    it('should handle markdown with special HTML entities', () => {
+    it('should handle markdown with special HTML entities', async () => {
       const markdown = 'Use &amp; for ampersand, &lt; for less than, &gt; for greater than'
-      const html = renderMarkdown(markdown)
+      const html = await renderMarkdownAsync(markdown)
       
       expect(html).toContain('&amp;')
       expect(html).toContain('&lt;')
       expect(html).toContain('&gt;')
     })
 
-    it('should handle markdown with emoji', () => {
+    it('should handle markdown with emoji', async () => {
       const markdown = 'Hello 😀 world 🎉'
-      const html = renderMarkdown(markdown)
+      const html = await renderMarkdownAsync(markdown)
       
       expect(html).toContain('😀')
       expect(html).toContain('🎉')
     })
 
-    it('should handle markdown with CJK characters', () => {
+    it('should handle markdown with CJK characters', async () => {
       const markdown = '你好世界\n\n这是中文内容\n\n- 列表项1\n- 列表项2'
-      const html = renderMarkdown(markdown)
+      const html = await renderMarkdownAsync(markdown)
       
       expect(html).toContain('你好世界')
       expect(html).toContain('这是中文内容')
       expect(html).toContain('<li>')
     })
 
-    it('should handle markdown with RTL text', () => {
+    it('should handle markdown with RTL text', async () => {
       const markdown = 'Hello مرحبا Hello'
-      const html = renderMarkdown(markdown)
+      const html = await renderMarkdownAsync(markdown)
       
       expect(html).toContain('مرحبا')
     })
 
-    it('should handle very long markdown document', () => {
+    it('should handle very long markdown document', async () => {
       let longMarkdown = ''
       for (let i = 0; i < 100; i++) {
         longMarkdown += `## Section ${i}\n\nThis is content for section ${i}.\n\n`
       }
-      const html = renderMarkdown(longMarkdown)
+      const html = await renderMarkdownAsync(longMarkdown)
       
       expect(html).toContain('<h2')
     })
 
-    it('should handle markdown with many code blocks', () => {
+    it('should handle markdown with many code blocks', async () => {
       let markdown = ''
       for (let i = 0; i < 10; i++) {
         markdown += `\`\`\`javascript\nconst x${i} = ${i};\n\`\`\`\n\n`
       }
-      const html = renderMarkdown(markdown)
+      const html = await renderMarkdownAsync(markdown)
       
       const preCount = (html.match(/<pre/g) || []).length
       expect(preCount).toBe(10)
     })
 
-    it('should handle markdown with nested emphasis', () => {
+    it('should handle markdown with nested emphasis', async () => {
       const markdown = '***bold italic***'
-      const html = renderMarkdown(markdown)
+      const html = await renderMarkdownAsync(markdown)
       
       expect(html).toContain('<strong')
       expect(html).toContain('<em')
     })
 
-    it('should handle markdown with strikethrough', () => {
+    it('should handle markdown with strikethrough', async () => {
       const markdown = '~~strikethrough~~'
-      const html = renderMarkdown(markdown)
+      const html = await renderMarkdownAsync(markdown)
       
       // markdown-it uses <s> for strikethrough by default
       expect(html).toContain('<s>strikethrough</s>')
     })
 
-    it('should handle markdown with horizontal rule', () => {
+    it('should handle markdown with horizontal rule', async () => {
       const markdown = '---'
-      const html = renderMarkdown(markdown)
+      const html = await renderMarkdownAsync(markdown)
       
       expect(html).toContain('<hr')
     })
 
-    it('should handle markdown with nested lists', () => {
+    it('should handle markdown with nested lists', async () => {
       const markdown = '- Item 1\n  - Subitem 1\n    - Subsubitem 1\n  - Subitem 2\n- Item 2'
-      const html = renderMarkdown(markdown)
+      const html = await renderMarkdownAsync(markdown)
       
       expect(html).toContain('<ul')
       expect(html).toContain('<li')
     })
 
-    it('should handle markdown with definition lists', () => {
+    it('should handle markdown with definition lists', async () => {
       const markdown = 'Term 1\n: Definition 1\n\nTerm 2\n: Definition 2'
-      const html = renderMarkdown(markdown)
+      const html = await renderMarkdownAsync(markdown)
       
       expect(html).toBeDefined()
     })
   })
 
   describe('renderMermaid - Additional Coverage', () => {
-    it('should handle mermaid code with special characters', () => {
+    it('should handle mermaid code with special characters', async () => {
       const code = 'flowchart TD\n    A["Start"] --> B["End"]'
       const result = renderMermaid(code)
       
       expect(result).toBe(code)
     })
 
-    it('should handle mermaid code with unicode', () => {
+    it('should handle mermaid code with unicode', async () => {
       const code = 'flowchart TD\n    A["你好"] --> B["世界"]'
       const result = renderMermaid(code)
       
       expect(result).toBe(code)
     })
 
-    it('should handle very long mermaid code', () => {
+    it('should handle very long mermaid code', async () => {
       let longCode = 'flowchart TD\n'
       for (let i = 0; i < 50; i++) {
         longCode += `    A${i} --> A${i + 1}\n`
@@ -281,21 +281,21 @@ describe('useMarkdown - Error Handling Coverage', () => {
       expect(result).toBe(longCode)
     })
 
-    it('should handle empty mermaid code string', () => {
+    it('should handle empty mermaid code string', async () => {
       const code = ''
       const result = renderMermaid(code)
       
       expect(result).toBe('')
     })
 
-    it('should handle mermaid code with numbers', () => {
+    it('should handle mermaid code with numbers', async () => {
       const code = 'gantt\n    title Project\n    section Section\n    Task 1 :a1, 2024-01-01, 3d'
       const result = renderMermaid(code)
       
       expect(result).toBe(code)
     })
 
-    it('should handle mermaid code with quotes', () => {
+    it('should handle mermaid code with quotes', async () => {
       const code = 'sequenceDiagram\n    Alice->>Bob: "Hello"'
       const result = renderMermaid(code)
       

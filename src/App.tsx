@@ -142,10 +142,14 @@ export default function App() {
   useEffect(() => {
     let cancelled = false
     async function init() {
+      const bootT0 = performance.now()
       const settingsStore = getSettingsStore()
       const tabStore = getTabStore()
       try {
         await settingsStore.loadSettings()
+        void import('./lib/perfLog').then(({ perfLog }) =>
+          perfLog(`frontend: settings loaded in ${(performance.now() - bootT0).toFixed(0)}ms`),
+        )
         if (cancelled) return
         setSidebarCollapsed(settingsStore.settings.sidebarCollapsed)
         setSidebarPosition(settingsStore.settings.sidebarPosition)
@@ -182,7 +186,13 @@ export default function App() {
               const session = await loadSession()
               if (cancelled) return
               if (session.openPaths.length > 0 || session.workingDirectory) {
+                const restoreT0 = performance.now()
                 await tabStore.restoreSession(session)
+                void import('./lib/perfLog').then(({ perfLog }) =>
+                  perfLog(
+                    `frontend: session restored (${session.openPaths.length} tabs) in ${(performance.now() - restoreT0).toFixed(0)}ms`,
+                  ),
+                )
               }
             }
           } catch (e) {

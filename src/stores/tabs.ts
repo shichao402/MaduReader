@@ -272,11 +272,15 @@ class TabStore {
       return
     }
 
+    const t0 = performance.now()
     try {
       this._fileTree =
         this._virtualFiles.size > 0
           ? this.buildVirtualFileTree(this._workingDirectory)
           : pruneNonMarkdownNodes(await this.buildFileTree(this._workingDirectory))
+      void import('../lib/perfLog').then(({ perfLog }) =>
+        perfLog(`frontend: file tree built in ${(performance.now() - t0).toFixed(0)}ms`),
+      )
       this.emit()
     } catch (e) {
       console.error('[Tabs] Failed to refresh file tree:', e)
@@ -285,37 +289,39 @@ class TabStore {
 
   async buildFileTree(dir = this._workingDirectory, depth = 0): Promise<FileNode[]> {
     const { allowAndReadDir } = await import('../lib/fsAccess')
-    const nodes: FileNode[] = []
+    const emptyNodes: FileNode[] = []
 
-    if (!dir || depth > 10) return nodes
+    if (!dir || depth > 10) return emptyNodes
 
     let entries: Array<{ name: string; isDirectory: boolean }> = []
     try {
       entries = (await allowAndReadDir(dir)) || []
     } catch (e) {
       console.error('[Tabs] Failed to read directory:', e)
-      return nodes
+      return emptyNodes
     }
 
-    for (const entry of entries) {
-      if (entry.name.startsWith('.')) continue
-      if (entry.name === 'node_modules') continue
+    const visibleEntries = entries.filter(
+      (entry) => !entry.name.startsWith('.') && entry.name !== 'node_modules',
+    )
 
-      const fullPath = `${dir}/${entry.name}`
-      const node: FileNode = {
-        name: entry.name,
-        path: fullPath,
-        isDir: entry.isDirectory,
-        children: [],
-        expanded: false,
-      }
-
-      if (entry.isDirectory) {
-        node.children = await this.buildFileTree(fullPath, depth + 1)
-      }
-
-      nodes.push(node)
-    }
+    // 并行遍历子目录，深层目录树构建耗时从累加变为取最慢分支
+    const nodes: FileNode[] = await Promise.all(
+      visibleEntries.map(async (entry) => {
+        const fullPath = `${dir}/${entry.name}`
+        const node: FileNode = {
+          name: entry.name,
+          path: fullPath,
+          isDir: entry.isDirectory,
+          children: [],
+          expanded: false,
+        }
+        if (entry.isDirectory) {
+          node.children = await this.buildFileTree(fullPath, depth + 1)
+        }
+        return node
+      }),
+    )
 
     // 排序：目录在前，然后按名称
     nodes.sort((a, b) => {
@@ -428,7 +434,7 @@ class TabStore {
     }
   }
 
-  /** 启动时恢复上次会话：授权并逐个打开文件，最后切到最后活动的文件 */
+  /** 启动时恢复上次会话：并行授权+读取文件（串行是启动慢的主因之一），按原顺序落位标签，最后切到最后活动的文件 */
   async restoreSession(session: SessionData): Promise<void> {
     if (session.workingDirectory) {
       this._workingDirectory = normalizePath(session.workingDirectory)
@@ -437,19 +443,58 @@ class TabStore {
     const paths = activeNormalized
       ? [activeNormalized, ...session.openPaths.filter((p) => normalizePath(p) !== activeNormalized)]
       : session.openPaths
-    for (const path of paths) {
-      try {
-        await this.openFile(path)
-      } catch (e) {
-        console.error('[Tabs] Failed to restore session file:', path, e)
-      }
+
+    const restoreT0 = performance.now()
+    // 并行做「授权 + 读文件」，单个失败跳过；results 下标顺序 = paths 顺序，保证标签顺序稳定
+    const results = await Promise.all(
+      paths.map(async (path) => {
+        const normalizedPath = normalizePath(path)
+        try {
+          let content: string
+          if (this._virtualFiles.has(normalizedPath)) {
+            content = this._virtualFiles.get(normalizedPath) || ''
+          } else {
+            const { allowAndReadTextFile } = await import('../lib/fsAccess')
+            content = await allowAndReadTextFile(path)
+          }
+          return { normalizedPath, content }
+        } catch (e) {
+          console.error('[Tabs] Failed to restore session file:', path, e)
+          return null
+        }
+      }),
+    )
+
+    // 并行读文件耗时单独打点，便于与目录树构建耗时区分
+    void import('../lib/perfLog').then(({ perfLog }) =>
+      perfLog(`frontend: session file reads done in ${(performance.now() - restoreT0).toFixed(0)}ms`),
+    )
+
+    for (const result of results) {
+      if (!result) continue
+      // 恢复期间可能已被手动打开，避免重复建标签
+      if (this._tabs.some((t) => t.path === result.normalizedPath && !t.isUntitled)) continue
+      this._tabs.push({
+        id: `tab-${Date.now()}-${++this._tabCounter}`,
+        path: result.normalizedPath,
+        name: getBaseName(result.normalizedPath),
+        content: result.content,
+        isModified: false,
+        isUntitled: false,
+      })
+    }
+
+    // 会话缺 workingDirectory 时，用第一个文件所在目录兜底（与原 openFile 行为一致）
+    if (!this._workingDirectory && this._tabs.length > 0) {
+      this._workingDirectory = getDirName(this._tabs[0].path)
     }
     if (activeNormalized) {
       const target = this._tabs.find((t) => t.path === activeNormalized)
       if (target) this._activeTabId = target.id
     }
+    // 目录树构建（含递归授权）耗时较高，放后台执行不阻塞内容展示；完成后 refreshFileTree 内部会自行 emit
     if (this._workingDirectory && this._fileTree.length === 0) {
-      await this.refreshFileTree()
+      void this.refreshFileTree()
     }
     this.emit()
   }

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { X } from 'lucide-react'
 import { getTabStore, getSettingsStore } from '../bridge'
-import { renderMarkdown } from '../composables/useMarkdown'
+import { renderMarkdownAsync } from '../composables/useMarkdown'
 
 interface ExportDialogProps {
   open: boolean
@@ -85,7 +85,7 @@ export default function ExportDialog({ open, onOpenChange, renderedHtml }: Expor
   async function handleExport() {
     if (!tabStore.activeTab) return
 
-    const htmlContent = renderedHtml || renderMarkdown(tabStore.activeContent)
+    const htmlContent = renderedHtml || (await renderMarkdownAsync(tabStore.activeContent))
 
     if (exportFormat === 'html') {
       const fullHtml = buildExportHtml(htmlContent)

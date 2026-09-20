@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { Folder, FolderOpen, ZoomIn, ZoomOut, Search, Download, Presentation, Sun, Moon, Settings, BookOpen, Command } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { getTabStore, getSettingsStore, useStores } from '../hooks/useStores'
-import { renderMarkdown, initCodeCopy } from '../composables/useMarkdown'
+import { renderMarkdownAsync, initCodeCopy } from '../composables/useMarkdown'
 import { renderMermaidCode } from '../composables/useMermaid'
 import { renderPlantUmlCode } from '../composables/usePlantUml'
 import { attachLinkHandler, detachLinkHandler } from '../composables/useLinkHandler'
@@ -91,7 +91,7 @@ export default function ContentArea({
           slideMode && hasSlides
             ? slides[currentSlide] || slides[0]
             : tabStore.activeContent
-        let html = renderMarkdown(source)
+        let html = await renderMarkdownAsync(source)
         html = await renderMermaidCode(html)
         html = renderPlantUmlCode(html, settingsStore.settings.plantUmlServer)
         html = await resolveLocalImageSources(html, tabStore.activeTab.path)

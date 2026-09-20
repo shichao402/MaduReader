@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // Mock dependencies
 vi.mock('@/composables/useMarkdown', () => ({
   useMarkdown: vi.fn(() => ({
-    renderMarkdown: vi.fn((content: string) => {
+    renderMarkdownAsync: vi.fn((content: string) => {
       return content
         .replace(/# (.*)/g, '<h1>$1</h1>')
         .replace(/\*\*(.*)\*\*/g, '<strong>$1</strong>')
@@ -41,74 +41,74 @@ describe('useMarkdown - Full Coverage', () => {
     useMarkdown = module.useMarkdown as any
   })
 
-  describe('renderMarkdown - Full Coverage', () => {
+  describe('renderMarkdownAsync - Full Coverage', () => {
     it('should render markdown content', async () => {
-      const { renderMarkdown } = useMarkdown()
+      const { renderMarkdownAsync } = useMarkdown()
       const content = '# Test\n\nParagraph'
       
-      const result = renderMarkdown(content)
+      const result = await renderMarkdownAsync(content)
       
       expect(result).toBeDefined()
     })
 
     it('should render empty content', async () => {
-      const { renderMarkdown } = useMarkdown()
+      const { renderMarkdownAsync } = useMarkdown()
       
-      const result = renderMarkdown('')
+      const result = await renderMarkdownAsync('')
       
       expect(result).toBeDefined()
     })
 
     it('should render content with headers', async () => {
-      const { renderMarkdown } = useMarkdown()
+      const { renderMarkdownAsync } = useMarkdown()
       const content = '# H1\n## H2\n### H3'
       
-      const result = renderMarkdown(content)
+      const result = await renderMarkdownAsync(content)
       
       expect(result).toBeDefined()
     })
 
     it('should render content with lists', async () => {
-      const { renderMarkdown } = useMarkdown()
+      const { renderMarkdownAsync } = useMarkdown()
       const content = '- Item 1\n- Item 2\n- Item 3'
       
-      const result = renderMarkdown(content)
+      const result = await renderMarkdownAsync(content)
       
       expect(result).toBeDefined()
     })
 
     it('should render content with tables', async () => {
-      const { renderMarkdown } = useMarkdown()
+      const { renderMarkdownAsync } = useMarkdown()
       const content = '| Header 1 | Header 2 |\n|----------|----------|\n| Cell 1   | Cell 2   |'
       
-      const result = renderMarkdown(content)
+      const result = await renderMarkdownAsync(content)
       
       expect(result).toBeDefined()
     })
 
     it('should render content with blockquotes', async () => {
-      const { renderMarkdown } = useMarkdown()
+      const { renderMarkdownAsync } = useMarkdown()
       const content = '> This is a quote'
       
-      const result = renderMarkdown(content)
+      const result = await renderMarkdownAsync(content)
       
       expect(result).toBeDefined()
     })
 
     it('should render content with code fences', async () => {
-      const { renderMarkdown } = useMarkdown()
+      const { renderMarkdownAsync } = useMarkdown()
       const content = '```javascript\nconst x = 1;\n```'
       
-      const result = renderMarkdown(content)
+      const result = await renderMarkdownAsync(content)
       
       expect(result).toBeDefined()
     })
 
     it('should render content with multiple code blocks', async () => {
-      const { renderMarkdown } = useMarkdown()
+      const { renderMarkdownAsync } = useMarkdown()
       const content = '```python\nx = 1\n```\n\n```javascript\ny = 2\n```'
       
-      const result = renderMarkdown(content)
+      const result = await renderMarkdownAsync(content)
       
       expect(result).toBeDefined()
     })
@@ -352,118 +352,118 @@ describe('useMarkdown - Full Coverage', () => {
 
   describe('Edge Cases and Error Handling', () => {
     it('should handle very long content', async () => {
-      const { renderMarkdown } = useMarkdown()
+      const { renderMarkdownAsync } = useMarkdown()
       const longContent = Array(1000).fill('# Heading').join('\n')
       
-      const result = renderMarkdown(longContent)
+      const result = await renderMarkdownAsync(longContent)
       
       expect(result).toBeDefined()
     })
 
     it('should handle content with special characters', async () => {
-      const { renderMarkdown } = useMarkdown()
+      const { renderMarkdownAsync } = useMarkdown()
       const content = 'Special chars: <>&"\'`'
       
-      const result = renderMarkdown(content)
+      const result = await renderMarkdownAsync(content)
       
       expect(result).toBeDefined()
     })
 
     it('should handle unicode content', async () => {
-      const { renderMarkdown } = useMarkdown()
+      const { renderMarkdownAsync } = useMarkdown()
       const content = '中文内容\n日本語\n한국어'
       
-      const result = renderMarkdown(content)
+      const result = await renderMarkdownAsync(content)
       
       expect(result).toBeDefined()
     })
 
     it('should handle content with emoji', async () => {
-      const { renderMarkdown } = useMarkdown()
+      const { renderMarkdownAsync } = useMarkdown()
       const content = 'Emoji: 🎉🚀💻'
       
-      const result = renderMarkdown(content)
+      const result = await renderMarkdownAsync(content)
       
       expect(result).toBeDefined()
     })
 
     it('should handle content with mixed formatting', async () => {
-      const { renderMarkdown } = useMarkdown()
+      const { renderMarkdownAsync } = useMarkdown()
       const content = '# Title\n\n**Bold** *italic* ~~strikethrough~~ [link](url) `code`'
       
-      const result = renderMarkdown(content)
+      const result = await renderMarkdownAsync(content)
       
       expect(result).toBeDefined()
     })
 
     it('should handle nested lists', async () => {
-      const { renderMarkdown } = useMarkdown()
+      const { renderMarkdownAsync } = useMarkdown()
       const content = '- Item 1\n  - Nested 1\n    - Deep nested\n  - Nested 2\n- Item 2'
       
-      const result = renderMarkdown(content)
+      const result = await renderMarkdownAsync(content)
       
       expect(result).toBeDefined()
     })
 
     it('should handle ordered lists', async () => {
-      const { renderMarkdown } = useMarkdown()
+      const { renderMarkdownAsync } = useMarkdown()
       const content = '1. First\n2. Second\n3. Third'
       
-      const result = renderMarkdown(content)
+      const result = await renderMarkdownAsync(content)
       
       expect(result).toBeDefined()
     })
 
     it('should handle task lists', async () => {
-      const { renderMarkdown } = useMarkdown()
+      const { renderMarkdownAsync } = useMarkdown()
       const content = '- [x] Done\n- [ ] Todo'
       
-      const result = renderMarkdown(content)
+      const result = await renderMarkdownAsync(content)
       
       expect(result).toBeDefined()
     })
 
     it('should handle horizontal rules', async () => {
-      const { renderMarkdown } = useMarkdown()
+      const { renderMarkdownAsync } = useMarkdown()
       const content = 'Paragraph 1\n\n---\n\nParagraph 2'
       
-      const result = renderMarkdown(content)
+      const result = await renderMarkdownAsync(content)
       
       expect(result).toBeDefined()
     })
 
     it('should handle definition lists', async () => {
-      const { renderMarkdown } = useMarkdown()
+      const { renderMarkdownAsync } = useMarkdown()
       const content = 'Term\n: Definition\nAnother\n: Another definition'
       
-      const result = renderMarkdown(content)
+      const result = await renderMarkdownAsync(content)
       
       expect(result).toBeDefined()
     })
 
     it('should handle footnotes', async () => {
-      const { renderMarkdown } = useMarkdown()
+      const { renderMarkdownAsync } = useMarkdown()
       const content = 'Text[^1]\n\n[^1]: Footnote content'
       
-      const result = renderMarkdown(content)
+      const result = await renderMarkdownAsync(content)
       
       expect(result).toBeDefined()
     })
 
     it('should handle abbreviations', async () => {
-      const { renderMarkdown } = useMarkdown()
+      const { renderMarkdownAsync } = useMarkdown()
       const content = '*[HTML]: HyperText Markup Language\nUse HTML'
       
-      const result = renderMarkdown(content)
+      const result = await renderMarkdownAsync(content)
       
       expect(result).toBeDefined()
     })
 
     it('should handle admonitions', async () => {
-      const { renderMarkdown } = useMarkdown()
+      const { renderMarkdownAsync } = useMarkdown()
       const content = '> [!NOTE]\n> This is a note'
       
-      const result = renderMarkdown(content)
+      const result = await renderMarkdownAsync(content)
       
       expect(result).toBeDefined()
     })

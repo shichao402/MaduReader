@@ -87,8 +87,8 @@ describe('basic test', () => {
   })
 
   it('should render markdown', async () => {
-    const { renderMarkdown } = await import('../../src/composables/useMarkdown')
-    const html = renderMarkdown('# Hello')
+    const { renderMarkdownAsync } = await import('../../src/composables/useMarkdown')
+    const html = await renderMarkdownAsync('# Hello')
     expect(html).toContain('h1')
   })
 

@@ -1,10 +1,32 @@
-import katex from 'katex'
-
 /**
  * 处理 KaTeX 数学公式
  * 支持行内公式 $...$ 和块级公式 $$...$$
+ *
+ * katex 体积较大（约 300KB min），改为按需动态加载：
+ * 仅当内容含公式时才引入，无公式文档全程不加载，避免拖慢首屏。
  */
-export function processKatex(html: string): string {
+
+let katexPromise: Promise<typeof import('katex')['default']> | null = null
+
+function loadKatex(): Promise<typeof import('katex')['default']> {
+  if (!katexPromise) {
+    katexPromise = import('katex').then((m) => m.default)
+  }
+  return katexPromise
+}
+
+export async function processKatex(html: string): Promise<string> {
+  // 无公式内容直接返回，不触发 katex 加载
+  if (!hasMath(html)) return html
+
+  let katex: typeof import('katex')['default']
+  try {
+    katex = await loadKatex()
+  } catch (error) {
+    console.error('KaTeX load error:', error)
+    return html
+  }
+
   // 处理块级公式 $$...$$
   html = html.replace(/\$\$([\s\S]+?)\$\$/g, (_match, code: string) => {
     try {
