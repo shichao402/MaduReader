@@ -1,8 +1,7 @@
-import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
+// Vanilla store：框架无关的单例状态 + 手动通知。
+// React 侧通过 useSyncExternalStore 订阅，不再依赖任何响应式框架。
 
-console.log('[Settings] Module loaded')
+import { invoke } from '@tauri-apps/api/core'
 
 export interface MermaidConfig {
   theme: string
@@ -27,7 +26,7 @@ export interface Settings {
   windowMaterial: 'off' | 'mica' | 'acrylic'
 }
 
-const DEFAULT_SETTINGS: Settings = {
+export const DEFAULT_SETTINGS: Settings = {
   theme: 'light',
   fontSize: 16,
   zoom: 100,
@@ -40,12 +39,12 @@ const DEFAULT_SETTINGS: Settings = {
   mermaidConfig: {
     theme: 'default',
     securityLevel: 'loose',
-    startOnLoad: true
+    startOnLoad: true,
   },
   plantUmlServer: 'https://www.plantuml.com/plantuml',
   proxyEnabled: false,
   proxyServer: '',
-  windowMaterial: 'mica'
+  windowMaterial: 'mica',
 }
 
 const STORAGE_KEY = 'madureader-settings'
@@ -54,46 +53,90 @@ function isTauriRuntime(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 }
 
-export const useSettingsStore = defineStore('settings', () => {
-  console.log('[Settings] Store initialized')
-  const settings = ref<Settings>({ ...DEFAULT_SETTINGS })
-  const isLoaded = ref(false)
+type Listener = () => void
 
-  const isDark = computed(() => {
-    if (settings.value.theme === 'system') {
+class SettingsStore {
+  private _settings: Settings = { ...DEFAULT_SETTINGS }
+  private _isLoaded = false
+
+  private _version = 0
+  private _listeners = new Set<Listener>()
+
+  subscribe = (listener: Listener): (() => void) => {
+    this._listeners.add(listener)
+    return () => {
+      this._listeners.delete(listener)
+    }
+  }
+
+  private emit(): void {
+    this._version += 1
+    this._listeners.forEach((listener) => listener())
+  }
+
+  get version(): number {
+    return this._version
+  }
+
+  /** 测试隔离用：恢复默认设置 */
+  reset(): void {
+    this._settings = { ...DEFAULT_SETTINGS }
+    this._isLoaded = false
+    this.emit()
+  }
+
+  get settings(): Settings {
+    return this._settings
+  }
+
+  /** 显式更新入口：合并部分字段后通知并持久化 */
+  update(patch: Partial<Settings>, options: { save?: boolean } = {}): void {
+    this._settings = { ...this._settings, ...patch }
+    if (options.save !== false) {
+      this.saveSettings()
+    }
+    this.emit()
+  }
+
+  get isLoaded(): boolean {
+    return this._isLoaded
+  }
+
+  get isDark(): boolean {
+    if (this._settings.theme === 'system') {
       return window.matchMedia('(prefers-color-scheme: dark)').matches
     }
-    return settings.value.theme === 'dark'
-  })
+    return this._settings.theme === 'dark'
+  }
 
-  const themeClass = computed(() => {
-    return isDark.value ? 'dark' : 'light'
-  })
+  get themeClass(): string {
+    return this.isDark ? 'dark' : 'light'
+  }
 
-  const currentZoom = computed(() => settings.value.zoom)
+  get currentZoom(): number {
+    return this._settings.zoom
+  }
 
-  async function loadSettings() {
-    console.log('[Settings] loadSettings started')
+  async loadSettings(): Promise<void> {
     try {
       if (!isTauriRuntime()) {
         const data = window.localStorage.getItem(STORAGE_KEY)
         if (data) {
           const loaded = JSON.parse(data)
-          settings.value = { ...DEFAULT_SETTINGS, ...loaded }
+          this._settings = { ...DEFAULT_SETTINGS, ...loaded }
         }
-        isLoaded.value = true
-        applyTheme()
+        this._isLoaded = true
+        this.applyTheme()
+        this.emit()
         return
       }
 
       const fs = await import('@tauri-apps/plugin-fs')
-      console.log('[Settings] FS plugin loaded')
-      
+
       const appDataDir = await invoke<string>('app_data_dir')
-      console.log('[Settings] App data dir:', appDataDir)
-      
+
       const configPath = `${appDataDir}config.json`
-      
+
       // 检查配置文件是否存在
       let isFile = false
       try {
@@ -102,59 +145,53 @@ export const useSettingsStore = defineStore('settings', () => {
       } catch {
         isFile = false
       }
-      
-      console.log('[Settings] Config file exists:', isFile)
-      
+
       if (isFile) {
         const data = await fs.readTextFile(configPath)
         const loaded = JSON.parse(data)
-        console.log('[Settings] Loaded settings from file:', loaded)
-        settings.value = { ...DEFAULT_SETTINGS, ...loaded }
+        this._settings = { ...DEFAULT_SETTINGS, ...loaded }
       }
-      isLoaded.value = true
-      console.log('[Settings] Applying theme, isDark:', isDark.value)
-      applyTheme()
-      void applyWindowMaterial()
-      console.log('[Settings] loadSettings completed successfully')
+      this._isLoaded = true
+      this.applyTheme()
+      void this.applyWindowMaterial()
+      this.emit()
     } catch (e) {
       console.error('[Settings] Failed to load settings:', e)
-      isLoaded.value = true
+      this._isLoaded = true
+      this.emit()
     }
   }
 
-  async function saveSettings() {
+  async saveSettings(): Promise<void> {
     try {
       if (!isTauriRuntime()) {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings.value))
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(this._settings))
         return
       }
 
       const fs = await import('@tauri-apps/plugin-fs')
       const appDataDir = await invoke<string>('app_data_dir')
       const configPath = `${appDataDir}config.json`
-      
-      await fs.writeTextFile(configPath, JSON.stringify(settings.value, null, 2))
+
+      await fs.writeTextFile(configPath, JSON.stringify(this._settings, null, 2))
     } catch (e) {
       console.error('[Settings] Failed to save settings:', e)
     }
   }
 
-  function applyTheme() {
+  applyTheme(): void {
     const root = document.documentElement
-    console.log('[Settings] applyTheme called, isDark:', isDark.value)
-    console.log('[Settings] Root element:', root)
-    root.classList.toggle('dark', isDark.value)
-    root.classList.toggle('light', !isDark.value)
-    console.log('[Settings] Theme classes applied:', root.className)
+    root.classList.toggle('dark', this.isDark)
+    root.classList.toggle('light', !this.isDark)
   }
 
-  async function applyWindowMaterial() {
+  async applyWindowMaterial(): Promise<void> {
     if (!isTauriRuntime()) return
     try {
       const { getCurrentWindow, Effect } = await import('@tauri-apps/api/window')
       const win = getCurrentWindow()
       await win.clearEffects()
-      const material = settings.value.windowMaterial
+      const material = this._settings.windowMaterial
       if (material === 'mica') {
         await win.setEffects({ effects: [Effect.Tabbed] })
       } else if (material === 'acrylic') {
@@ -165,63 +202,51 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
-  function toggleTheme() {
-    settings.value.theme = settings.value.theme === 'light' ? 'dark' : 'light'
-    applyTheme()
-    void applyWindowMaterial()
-    saveSettings()
+  toggleTheme(): void {
+    this._settings.theme = this._settings.theme === 'light' ? 'dark' : 'light'
+    this.applyTheme()
+    void this.applyWindowMaterial()
+    void this.saveSettings()
+    this.emit()
   }
 
-  function setTheme(theme: 'light' | 'dark' | 'system') {
-    settings.value.theme = theme
-    applyTheme()
-    void applyWindowMaterial()
-    saveSettings()
+  setTheme(theme: Settings['theme']): void {
+    this._settings.theme = theme
+    this.applyTheme()
+    void this.applyWindowMaterial()
+    void this.saveSettings()
+    this.emit()
   }
 
-  function setZoom(zoom: number) {
-    settings.value.zoom = Math.max(50, Math.min(200, zoom))
-    saveSettings()
+  setWindowMaterial(material: Settings['windowMaterial']): void {
+    this._settings.windowMaterial = material
+    void this.applyWindowMaterial()
+    void this.saveSettings()
+    this.emit()
   }
 
-  function increaseZoom() {
-    setZoom(settings.value.zoom + 10)
+  setZoom(zoom: number): void {
+    this._settings.zoom = Math.max(50, Math.min(200, zoom))
+    void this.saveSettings()
+    this.emit()
   }
 
-  function decreaseZoom() {
-    setZoom(settings.value.zoom - 10)
+  increaseZoom(): void {
+    this.setZoom(this._settings.zoom + 10)
   }
 
-  function resetZoom() {
-    setZoom(100)
+  decreaseZoom(): void {
+    this.setZoom(this._settings.zoom - 10)
   }
 
-  function openSettings() {
+  resetZoom(): void {
+    this.setZoom(100)
+  }
+
+  openSettings(): void {
     document.dispatchEvent(new CustomEvent('open-settings'))
     window.dispatchEvent(new CustomEvent('open-settings'))
   }
+}
 
-  return {
-    settings,
-    isLoaded,
-    isDark,
-    themeClass,
-    currentZoom,
-    loadSettings,
-    saveSettings,
-    applyTheme,
-    applyWindowMaterial,
-    toggleTheme,
-    setTheme,
-    setWindowMaterial(material: 'off' | 'mica' | 'acrylic') {
-      settings.value.windowMaterial = material
-      void applyWindowMaterial()
-      saveSettings()
-    },
-    setZoom,
-    increaseZoom,
-    decreaseZoom,
-    resetZoom,
-    openSettings
-  }
-})
+export const settingsStore = new SettingsStore()

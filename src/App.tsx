@@ -97,7 +97,7 @@ Agent e2e 验证时会搜索这个文档中的关键字：navigation-target。
 ]
 
 export default function App() {
-  const { tabStore, settingsStore, snapshot } = useStores()
+  const { tabStore, settingsStore } = useStores()
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [sidebarPosition, setSidebarPosition] = useState<'left' | 'right'>('left')
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -114,7 +114,6 @@ export default function App() {
         if (cancelled) return
         setSidebarCollapsed(settingsStore.settings.sidebarCollapsed)
         setSidebarPosition(settingsStore.settings.sidebarPosition)
-
         if (isTauri) {
           try {
             const { invoke } = await import('@tauri-apps/api/core')
@@ -178,7 +177,7 @@ export default function App() {
 
   function toggleSidebar() {
     setSidebarCollapsed((v) => {
-      settingsStore.settings.sidebarCollapsed = !v
+      settingsStore.update({ sidebarCollapsed: !v }, { save: false })
       settingsStore.saveSettings()
       return !v
     })
@@ -187,7 +186,7 @@ export default function App() {
   function toggleSidebarPosition() {
     setSidebarPosition((v) => {
       const next = v === 'left' ? 'right' : 'left'
-      settingsStore.settings.sidebarPosition = next
+      settingsStore.update({ sidebarPosition: next }, { save: false })
       settingsStore.saveSettings()
       return next
     })
@@ -216,7 +215,7 @@ export default function App() {
       {sidebarCollapsed ? (
         <SidebarIconBar
           sidebarPosition={sidebarPosition}
-          isDark={snapshot.isDark}
+          isDark={settingsStore.isDark}
           onSetView={(view) => {
             tabStore.setSidebarView(view)
             toggleSidebar()
@@ -233,12 +232,12 @@ export default function App() {
           style={{ order: sidebarPosition === 'right' ? 2 : 0 }}
         >
           <Sidebar
-            view={snapshot.sidebarView}
-            fileTree={snapshot.fileTree}
-            tabs={snapshot.tabs}
-            activeTabId={snapshot.activeTabId}
-            activePath={snapshot.tabs.find((t) => t.id === snapshot.activeTabId)?.path ?? null}
-            workingDirectory={snapshot.workingDirectory}
+            view={tabStore.sidebarView}
+            fileTree={tabStore.fileTree}
+            tabs={tabStore.tabs}
+            activeTabId={tabStore.activeTabId}
+            activePath={tabStore.tabs.find((t) => t.id === tabStore.activeTabId)?.path ?? null}
+            workingDirectory={tabStore.workingDirectory}
             sidebarPosition={sidebarPosition}
             onViewChange={(view) => tabStore.setSidebarView(view)}
             onCollapse={toggleSidebar}

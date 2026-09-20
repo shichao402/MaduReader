@@ -84,7 +84,7 @@ export default function CommandPalette({
   onOpenChange: (open: boolean) => void
   onToggleSidebar: () => void
 }) {
-  const { snapshot, tabStore, settingsStore } = useStores()
+  const { tabStore, settingsStore } = useStores()
   const [query, setQuery] = useState('')
   const [sel, setSel] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -99,7 +99,7 @@ export default function CommandPalette({
   }, [open])
 
   const items = useMemo<CommandItem[]>(() => {
-    const files = flattenFiles(snapshot.fileTree || [])
+    const files = flattenFiles(tabStore.fileTree || [])
       .slice(0, 40)
       .map<CommandItem>((f) => ({
         id: `file:${f.path}`,
@@ -110,7 +110,7 @@ export default function CommandPalette({
         action: () => void tabStore.openFile(f.path),
       }))
 
-    const headings = extractHeadings(snapshot.activeContent || '')
+    const headings = extractHeadings(tabStore.activeContent || '')
       .slice(0, 30)
       .map<CommandItem>((h, i) => ({
         id: `heading:${i}`,
@@ -158,8 +158,8 @@ export default function CommandPalette({
       {
         id: 'cmd:theme',
         section: '命令',
-        label: snapshot.isDark ? '切换到浅色主题' : '切换到深色主题',
-        icon: snapshot.isDark ? Sun : Moon,
+        label: settingsStore.isDark ? '切换到浅色主题' : '切换到深色主题',
+        icon: settingsStore.isDark ? Sun : Moon,
         action: () => settingsStore.toggleTheme(),
       },
       {
@@ -205,9 +205,9 @@ export default function CommandPalette({
 
     return [...files, ...headings, ...commands]
   }, [
-    snapshot.fileTree,
-    snapshot.activeContent,
-    snapshot.isDark,
+    tabStore.fileTree,
+    tabStore.activeContent,
+    settingsStore.isDark,
     tabStore,
     settingsStore,
     onToggleSidebar,

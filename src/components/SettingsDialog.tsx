@@ -1,6 +1,7 @@
 import * as Dialog from '@radix-ui/react-dialog'
 import { X } from 'lucide-react'
 import { getSettingsStore } from '../bridge'
+import type { Settings } from '../stores/settings'
 
 interface SettingsDialogProps {
   open: boolean
@@ -48,6 +49,20 @@ const mermaidThemeOptions = [
   { value: 'neutral', label: '中性' },
 ]
 
+// 弹窗内的本地草稿：编辑期间不落库，保存时一次性提交
+type Draft = Pick<
+  Settings,
+  | 'theme'
+  | 'fontSize'
+  | 'zoom'
+  | 'codeHighlightTheme'
+  | 'showLineNumbers'
+  | 'mermaidConfig'
+  | 'plantUmlServer'
+  | 'proxyEnabled'
+  | 'proxyServer'
+>
+
 export default function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const settingsStore = getSettingsStore()
   const s = settingsStore.settings
@@ -59,14 +74,14 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
   const sectionTitle =
     'text-xs font-semibold uppercase tracking-wide text-[color:var(--color-text-secondary)] mb-3'
 
-  function save() {
+  function commit(patch: Partial<Settings>) {
+    settingsStore.update(patch)
     settingsStore.applyTheme()
-    settingsStore.saveSettings()
   }
 
   function resetToDefaults() {
     if (confirm('确定要重置所有设置为默认值吗？')) {
-      Object.assign(s, {
+      commit({
         theme: 'light',
         fontSize: 16,
         zoom: 100,
@@ -85,8 +100,6 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
         proxyEnabled: false,
         proxyServer: '',
       })
-      settingsStore.applyTheme()
-      save()
     }
   }
 
@@ -112,9 +125,7 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
       reader.onload = (ev) => {
         try {
           const data = JSON.parse(ev.target?.result as string)
-          Object.assign(s, data)
-          settingsStore.applyTheme()
-          save()
+          commit(data)
           alert('设置导入成功')
         } catch {
           alert('导入失败：文件格式不正确')
@@ -123,6 +134,18 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
       reader.readAsText(file)
     }
     input.click()
+  }
+
+  const draft: Draft = {
+    theme: s.theme,
+    fontSize: s.fontSize,
+    zoom: s.zoom,
+    codeHighlightTheme: s.codeHighlightTheme,
+    showLineNumbers: s.showLineNumbers,
+    mermaidConfig: s.mermaidConfig,
+    plantUmlServer: s.plantUmlServer,
+    proxyEnabled: s.proxyEnabled,
+    proxyServer: s.proxyServer,
   }
 
   return (
@@ -148,11 +171,10 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
                 <label className={label}>主题模式</label>
                 <select
                   className={input}
-                  value={s.theme}
-                  onChange={(e) => {
-                    s.theme = e.target.value as 'light' | 'dark' | 'system'
-                    save()
-                  }}
+                  value={draft.theme}
+                  onChange={(e) =>
+                    commit({ theme: e.target.value as Settings['theme'] })
+                  }
                 >
                   {themeOptions.map((opt) => (
                     <option key={opt.value} value={opt.value}>
@@ -165,11 +187,8 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
                 <label className={label}>字体大小</label>
                 <select
                   className={input}
-                  value={s.fontSize}
-                  onChange={(e) => {
-                    s.fontSize = Number(e.target.value)
-                    save()
-                  }}
+                  value={draft.fontSize}
+                  onChange={(e) => commit({ fontSize: Number(e.target.value) })}
                 >
                   {fontSizeOptions.map((opt) => (
                     <option key={opt.value} value={opt.value}>
@@ -182,11 +201,8 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
                 <label className={label}>默认缩放</label>
                 <select
                   className={input}
-                  value={s.zoom}
-                  onChange={(e) => {
-                    s.zoom = Number(e.target.value)
-                    save()
-                  }}
+                  value={draft.zoom}
+                  onChange={(e) => commit({ zoom: Number(e.target.value) })}
                 >
                   {zoomOptions.map((opt) => (
                     <option key={opt.value} value={opt.value}>
@@ -203,11 +219,8 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
                 <label className={label}>代码高亮主题</label>
                 <select
                   className={input}
-                  value={s.codeHighlightTheme}
-                  onChange={(e) => {
-                    s.codeHighlightTheme = e.target.value
-                    save()
-                  }}
+                  value={draft.codeHighlightTheme}
+                  onChange={(e) => commit({ codeHighlightTheme: e.target.value })}
                 >
                   {codeThemeOptions.map((opt) => (
                     <option key={opt.value} value={opt.value}>
@@ -219,11 +232,8 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
               <label className="flex items-center gap-2 cursor-pointer text-sm">
                 <input
                   type="checkbox"
-                  checked={s.showLineNumbers}
-                  onChange={(e) => {
-                    s.showLineNumbers = e.target.checked
-                    save()
-                  }}
+                  checked={draft.showLineNumbers}
+                  onChange={(e) => commit({ showLineNumbers: e.target.checked })}
                 />
                 显示代码行号
               </label>
@@ -235,11 +245,12 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
                 <label className={label}>Mermaid 主题</label>
                 <select
                   className={input}
-                  value={s.mermaidConfig.theme}
-                  onChange={(e) => {
-                    s.mermaidConfig.theme = e.target.value
-                    save()
-                  }}
+                  value={draft.mermaidConfig.theme}
+                  onChange={(e) =>
+                    commit({
+                      mermaidConfig: { ...draft.mermaidConfig, theme: e.target.value },
+                    })
+                  }
                 >
                   {mermaidThemeOptions.map((opt) => (
                     <option key={opt.value} value={opt.value}>
@@ -253,11 +264,13 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
                 <input
                   type="text"
                   className={input}
-                  value={s.plantUmlServer}
-                  onChange={(e) => {
-                    s.plantUmlServer = e.target.value
+                  defaultValue={draft.plantUmlServer}
+                  key={draft.plantUmlServer}
+                  onBlur={(e) => {
+                    if (e.target.value !== draft.plantUmlServer) {
+                      commit({ plantUmlServer: e.target.value })
+                    }
                   }}
-                  onBlur={save}
                   placeholder="https://www.plantuml.com/plantuml"
                 />
               </div>
@@ -268,25 +281,24 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
               <label className="flex items-center gap-2 cursor-pointer text-sm mb-3">
                 <input
                   type="checkbox"
-                  checked={s.proxyEnabled}
-                  onChange={(e) => {
-                    s.proxyEnabled = e.target.checked
-                    save()
-                  }}
+                  checked={draft.proxyEnabled}
+                  onChange={(e) => commit({ proxyEnabled: e.target.checked })}
                 />
                 启用代理
               </label>
-              {s.proxyEnabled && (
+              {draft.proxyEnabled && (
                 <div>
                   <label className={label}>代理服务器</label>
                   <input
                     type="text"
                     className={input}
-                    value={s.proxyServer}
-                    onChange={(e) => {
-                      s.proxyServer = e.target.value
+                    defaultValue={draft.proxyServer}
+                    key={draft.proxyServer}
+                    onBlur={(e) => {
+                      if (e.target.value !== draft.proxyServer) {
+                        commit({ proxyServer: e.target.value })
+                      }
                     }}
-                    onBlur={save}
                     placeholder="http://proxy.example.com:8080"
                   />
                 </div>
@@ -296,7 +308,9 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
             <div className="flex flex-wrap gap-3 pt-5 border-t border-[color:var(--color-border-base)]">
               <button
                 className="px-4 py-2 text-sm font-medium rounded-md bg-[color:var(--color-primary)] text-white hover:bg-[color:var(--color-primary-hover)] transition-colors"
-                onClick={save}
+                onClick={() => {
+                  settingsStore.saveSettings()
+                }}
               >
                 保存设置
               </button>

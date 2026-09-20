@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { setActivePinia, createPinia } from 'pinia'
-import { useTabStore } from '../../src/stores/tabs'
-import { useSettingsStore } from '../../src/stores/settings'
+import { tabStore } from '../../src/stores/tabs'
+import { settingsStore } from '../../src/stores/settings'
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn().mockResolvedValue('/app/data/dir/')
@@ -15,7 +14,6 @@ vi.mock('@tauri-apps/plugin-fs', () => ({
 
 describe('Stores', () => {
   beforeEach(() => {
-    setActivePinia(createPinia())
     vi.clearAllMocks()
     Object.defineProperty(window, 'matchMedia', {
       value: (query: string) => ({
@@ -37,7 +35,8 @@ describe('Stores', () => {
     let store
 
     beforeEach(() => {
-      store = useTabStore()
+      store = tabStore
+      store.reset()
     })
 
     describe('initial state', () => {
@@ -244,7 +243,8 @@ describe('Stores', () => {
     let store
 
     beforeEach(() => {
-      store = useSettingsStore()
+      store = settingsStore
+      store.reset()
     })
 
     describe('initial state', () => {

@@ -44,7 +44,7 @@ export default function ContentArea({
 }: {
   onOpenSettings: () => void
 }) {
-  const { snapshot } = useStores()
+  const { tabStore, settingsStore } = useStores()
   const containerRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const [renderedContent, setRenderedContent] = useState('')
@@ -53,10 +53,10 @@ export default function ContentArea({
   const [exportOpen, setExportOpen] = useState(false)
   const [isEmpty, setIsEmpty] = useState(true)
 
-  const zoom = (snapshot.currentZoom ?? 100) / 100
+  const zoom = (settingsStore.currentZoom ?? 100) / 100
   const slides = useMemo(
-    () => splitMarkdownSlides(snapshot.activeContent ?? ''),
-    [snapshot.activeContent],
+    () => splitMarkdownSlides(tabStore.activeContent ?? ''),
+    [tabStore.activeContent],
   )
   const hasSlides = slides.length > 1
 
@@ -106,7 +106,7 @@ export default function ContentArea({
     return () => {
       cancelled = true
     }
-  }, [snapshot.activeContent, slideMode, currentSlide, hasSlides, slides])
+  }, [tabStore.activeContent, slideMode, currentSlide, hasSlides, slides])
 
   // 渲染完成后重新绑定链接处理
   useEffect(() => {
@@ -169,7 +169,7 @@ export default function ContentArea({
   // 幻灯片/页切换时重置页码
   useEffect(() => {
     setCurrentSlide(0)
-  }, [snapshot.activeTabId])
+  }, [tabStore.activeTabId])
 
   // 命令面板事件总线：open file / find / export / slideshow / scroll-to-heading
   useEffect(() => {
@@ -301,7 +301,7 @@ export default function ContentArea({
           title="重置缩放 (Ctrl+0)"
           data-kbd="Ctrl 0"
         >
-          {snapshot.currentZoom}%
+          {settingsStore.currentZoom}%
         </button>
         <div className="w-px h-5 bg-[color:var(--color-border-base)] mx-1" />
         <button className={toolBtn} onClick={findText} title="查找 (Ctrl+F)" data-kbd="Ctrl F">
@@ -326,7 +326,7 @@ export default function ContentArea({
           onClick={() => getSettingsStore().toggleTheme()}
           title="切换主题"
         >
-          {snapshot.isDark ? <Sun size={15} /> : <Moon size={15} />}
+          {settingsStore.isDark ? <Sun size={15} /> : <Moon size={15} />}
         </button>
         <button className={toolBtn} onClick={onOpenSettings} title="设置">
           <Settings size={15} />
@@ -367,7 +367,7 @@ export default function ContentArea({
               slideMode &&
                 'min-h-[calc(100vh-180px)] p-12 border border-[color:var(--color-border-base)] rounded-2xl shadow-lg bg-[color:var(--color-content)]',
             )}
-            style={{ fontSize: `${snapshot.settings?.fontSize ?? 16}px` }}
+            style={{ fontSize: `${settingsStore.settings?.fontSize ?? 16}px` }}
             dangerouslySetInnerHTML={{ __html: renderedContent }}
           />
         </div>

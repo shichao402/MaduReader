@@ -1,12 +1,12 @@
-import { useTabStore } from './stores/tabs'
-import { useSettingsStore } from './stores/settings'
+import { tabStore } from './stores/tabs'
+import { settingsStore } from './stores/settings'
 
 export function getTabStore() {
-  return useTabStore()
+  return tabStore
 }
 
 export function getSettingsStore() {
-  return useSettingsStore()
+  return settingsStore
 }
 
-export { useTabStore, useSettingsStore }
+export { tabStore as useTabStore, settingsStore as useSettingsStore }

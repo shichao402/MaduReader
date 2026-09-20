@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { setActivePinia, createPinia } from 'pinia'
-import { useTabStore } from '../../src/stores/tabs'
+import { tabStore } from '../../src/stores/tabs'
 
 // Mock @tauri-apps/plugin-fs
 vi.mock('@tauri-apps/plugin-fs', () => ({
@@ -18,8 +17,8 @@ describe('TabStore - Additional Coverage', () => {
   let store
 
   beforeEach(() => {
-    setActivePinia(createPinia())
-    store = useTabStore()
+    store = tabStore
+    store.reset()
     vi.clearAllMocks()
   })
 

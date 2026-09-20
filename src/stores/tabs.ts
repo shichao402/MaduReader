@@ -1,7 +1,5 @@
-import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
-
-console.log('[Tabs] Module loaded')
+// Vanilla store：框架无关的单例状态 + 手动通知。
+// React 侧通过 useSyncExternalStore 订阅，不再依赖任何响应式框架。
 
 export interface Tab {
   id: string
@@ -25,82 +23,171 @@ export interface VirtualFile {
   content: string
 }
 
-export const useTabStore = defineStore('tabs', () => {
-  console.log('[Tabs] Store initialized')
-  const tabs = ref<Tab[]>([])
-  const activeTabId = ref<string | null>(null)
-  const workingDirectory = ref<string>('')
-  const fileTree = ref<FileNode[]>([])
-  const sidebarView = ref<'tree' | 'tabs'>('tree')
+type SidebarView = 'tree' | 'tabs'
+type Listener = () => void
 
-  let tabCounter = 0
-  const virtualFiles = new Map<string, string>()
+function normalizePath(path: string): string {
+  return path.replace(/\\/g, '/').replace(/\/+/g, '/')
+}
 
-  function normalizePath(path: string): string {
-    return path.replace(/\\/g, '/').replace(/\/+/g, '/')
+function getBaseName(path: string): string {
+  return normalizePath(path).split('/').filter(Boolean).pop() || 'untitled'
+}
+
+function getDirName(path: string): string {
+  const normalized = normalizePath(path)
+  const index = normalized.lastIndexOf('/')
+  return index > 0 ? normalized.substring(0, index) : ''
+}
+
+function findNodeInTree(nodes: FileNode[], targetPath: string): FileNode | undefined {
+  for (const node of nodes) {
+    if (node.path === targetPath) return node
+    if (node.isDir && node.children) {
+      const found = findNodeInTree(node.children, targetPath)
+      if (found) return found
+    }
+  }
+  return undefined
+}
+
+class TabStore {
+  private _tabs: Tab[] = []
+  private _activeTabId: string | null = null
+  private _workingDirectory = ''
+  private _fileTree: FileNode[] = []
+  private _sidebarView: SidebarView = 'tree'
+
+  private _tabCounter = 0
+  private _virtualFiles = new Map<string, string>()
+
+  private _version = 0
+  private _listeners = new Set<Listener>()
+
+  subscribe = (listener: Listener): (() => void) => {
+    this._listeners.add(listener)
+    return () => {
+      this._listeners.delete(listener)
+    }
   }
 
-  function getBaseName(path: string): string {
-    return normalizePath(path).split('/').filter(Boolean).pop() || 'untitled'
+  private emit(): void {
+    this._version += 1
+    this._listeners.forEach((listener) => listener())
   }
 
-  function getDirName(path: string): string {
-    const normalized = normalizePath(path)
-    const index = normalized.lastIndexOf('/')
-    return index > 0 ? normalized.substring(0, index) : ''
+  get version(): number {
+    return this._version
   }
 
-  const activeTab = computed(() => {
-    if (!activeTabId.value) return null
-    return tabs.value.find(t => t.id === activeTabId.value) || null
-  })
+  /** 测试隔离用：恢复到初始空状态 */
+  reset(): void {
+    this._tabs = []
+    this._activeTabId = null
+    this._workingDirectory = ''
+    this._fileTree = []
+    this._sidebarView = 'tree'
+    this._tabCounter = 0
+    this._virtualFiles.clear()
+    this.emit()
+  }
 
-  const activeContent = computed(() => {
-    return activeTab.value?.content || ''
-  })
+  // ---- 状态访问 ----
 
-  async function openFile(path: string): Promise<void> {
+  get tabs(): Tab[] {
+    return this._tabs
+  }
+
+  set tabs(value: Tab[]) {
+    this._tabs = value
+    this.emit()
+  }
+
+  get activeTabId(): string | null {
+    return this._activeTabId
+  }
+
+  set activeTabId(value: string | null) {
+    this._activeTabId = value
+    this.emit()
+  }
+
+  get workingDirectory(): string {
+    return this._workingDirectory
+  }
+
+  set workingDirectory(value: string) {
+    this._workingDirectory = value
+    this.emit()
+  }
+
+  get fileTree(): FileNode[] {
+    return this._fileTree
+  }
+
+  set fileTree(value: FileNode[]) {
+    this._fileTree = value
+    this.emit()
+  }
+
+  get sidebarView(): SidebarView {
+    return this._sidebarView
+  }
+
+  set sidebarView(value: SidebarView) {
+    this._sidebarView = value
+    this.emit()
+  }
+
+  get activeTab(): Tab | null {
+    if (!this._activeTabId) return null
+    return this._tabs.find((t) => t.id === this._activeTabId) || null
+  }
+
+  get activeContent(): string {
+    return this.activeTab?.content || ''
+  }
+
+  // ---- 业务方法 ----
+
+  async openFile(path: string): Promise<void> {
     const normalizedPath = normalizePath(path)
     console.log('[Tabs] openFile called for:', normalizedPath)
     try {
       let content: string
-      if (virtualFiles.has(normalizedPath)) {
-        content = virtualFiles.get(normalizedPath) || ''
+      if (this._virtualFiles.has(normalizedPath)) {
+        content = this._virtualFiles.get(normalizedPath) || ''
       } else {
         const fs = await import('@tauri-apps/plugin-fs')
-        console.log('[Tabs] FS plugin loaded')
         content = await fs.readTextFile(path)
       }
-      console.log('[Tabs] File content read, length:', content.length)
       const name = getBaseName(normalizedPath)
-      
+
       // 检查是否已打开
-      const existingTab = tabs.value.find(t => t.path === normalizedPath && !t.isUntitled)
+      const existingTab = this._tabs.find((t) => t.path === normalizedPath && !t.isUntitled)
       if (existingTab) {
-        console.log('[Tabs] Tab already exists, switching to it')
-        activeTabId.value = existingTab.id
+        this._activeTabId = existingTab.id
+        this.emit()
         return
       }
 
       const newTab: Tab = {
-        id: `tab-${Date.now()}-${++tabCounter}`,
+        id: `tab-${Date.now()}-${++this._tabCounter}`,
         path: normalizedPath,
         name,
         content,
         isModified: false,
-        isUntitled: false
+        isUntitled: false,
       }
 
-      console.log('[Tabs] Creating new tab:', newTab.id)
-      tabs.value.push(newTab)
-      activeTabId.value = newTab.id
-      console.log('[Tabs] Tab created, activeTabId:', activeTabId.value)
-      
+      this._tabs.push(newTab)
+      this._activeTabId = newTab.id
+
       // 设置工作目录
-      if (!workingDirectory.value) {
-        workingDirectory.value = getDirName(normalizedPath)
-        console.log('[Tabs] Working directory set to:', workingDirectory.value)
+      if (!this._workingDirectory) {
+        this._workingDirectory = getDirName(normalizedPath)
       }
+      this.emit()
     } catch (e) {
       console.error('[Tabs] Failed to open file:', e)
       if (normalizedPath.includes('not-found')) {
@@ -110,108 +197,107 @@ export const useTabStore = defineStore('tabs', () => {
     }
   }
 
-  function newTab(): Tab {
-    const newTab: Tab = {
-      id: `tab-${Date.now()}-${++tabCounter}`,
+  newTab(): Tab {
+    const tab: Tab = {
+      id: `tab-${Date.now()}-${++this._tabCounter}`,
       path: '',
-      name: `新建文档 ${tabs.value.length + 1}`,
+      name: `新建文档 ${this._tabs.length + 1}`,
       content: '',
       isModified: false,
-      isUntitled: true
+      isUntitled: true,
     }
 
-    tabs.value.push(newTab)
-    activeTabId.value = newTab.id
-    console.log('[Tabs] New tab created:', newTab.id)
-    return newTab
+    this._tabs.push(tab)
+    this._activeTabId = tab.id
+    this.emit()
+    return tab
   }
 
-  async function closeTab(id: string): Promise<void> {
-    const index = tabs.value.findIndex(t => t.id === id)
+  async closeTab(id: string): Promise<void> {
+    const index = this._tabs.findIndex((t) => t.id === id)
     if (index === -1) return
 
-    tabs.value.splice(index, 1)
+    this._tabs.splice(index, 1)
 
-    if (activeTabId.value === id) {
-      if (tabs.value.length > 0) {
-        const newIndex = Math.min(index, tabs.value.length - 1)
-        activeTabId.value = tabs.value[newIndex].id
+    if (this._activeTabId === id) {
+      if (this._tabs.length > 0) {
+        const newIndex = Math.min(index, this._tabs.length - 1)
+        this._activeTabId = this._tabs[newIndex].id
       } else {
-        activeTabId.value = null
+        this._activeTabId = null
       }
     }
-    console.log('[Tabs] Tab closed, activeTabId:', activeTabId.value)
+    this.emit()
 
     await Promise.resolve()
-    if (tabs.value.length === 0) {
-      newTab()
+    if (this._tabs.length === 0) {
+      this.newTab()
     }
   }
 
-  function setActiveTab(id: string): void {
-    if (tabs.value.some(t => t.id === id)) {
-      activeTabId.value = id
-      console.log('[Tabs] Active tab set to:', id)
+  setActiveTab(id: string): void {
+    if (this._tabs.some((t) => t.id === id)) {
+      this._activeTabId = id
+      this.emit()
     }
   }
 
-  function updateTabContent(id: string, content: string): void {
-    const tab = tabs.value.find(t => t.id === id)
+  updateTabContent(id: string, content: string): void {
+    const tab = this._tabs.find((t) => t.id === id)
     if (tab) {
       tab.content = content
       tab.isModified = true
+      this.emit()
     }
   }
 
-  function saveActiveTab(): void {
-    if (!activeTabId.value) return
+  saveActiveTab(): void {
+    if (!this._activeTabId) return
 
-    const active = tabs.value.find(t => t.id === activeTabId.value)
+    const active = this._tabs.find((t) => t.id === this._activeTabId)
     if (!active || active.isUntitled) return
 
     import('@tauri-apps/plugin-fs').then(async (fs) => {
       try {
         await fs.writeTextFile(active.path, active.content)
         active.isModified = false
+        this.emit()
       } catch (e) {
         console.error('[Tabs] Failed to save file:', e)
       }
     })
   }
 
-  async function refreshFileTree(): Promise<void> {
-    if (!workingDirectory.value) {
-      console.log('[Tabs] refreshFileTree skipped - no working directory')
+  async refreshFileTree(): Promise<void> {
+    if (!this._workingDirectory) {
       return
     }
 
     try {
-      console.log('[Tabs] Refreshing file tree for:', workingDirectory.value)
-      fileTree.value = virtualFiles.size > 0
-        ? buildVirtualFileTree(workingDirectory.value)
-        : await buildFileTree(workingDirectory.value)
-      console.log('[Tabs] File tree refreshed, nodes:', fileTree.value.length)
+      this._fileTree =
+        this._virtualFiles.size > 0
+          ? this.buildVirtualFileTree(this._workingDirectory)
+          : await this.buildFileTree(this._workingDirectory)
+      this.emit()
     } catch (e) {
       console.error('[Tabs] Failed to refresh file tree:', e)
     }
   }
 
-  async function buildFileTree(dir = workingDirectory.value, depth = 0): Promise<FileNode[]> {
+  async buildFileTree(dir = this._workingDirectory, depth = 0): Promise<FileNode[]> {
     const fs = await import('@tauri-apps/plugin-fs')
     const nodes: FileNode[] = []
 
     if (!dir || depth > 10) return nodes
 
-    console.log('[Tabs] Building file tree for:', dir)
     let entries: Array<{ name: string; isDirectory: boolean }> = []
     try {
-      entries = await fs.readDir(dir) || []
+      entries = (await fs.readDir(dir)) || []
     } catch (e) {
       console.error('[Tabs] Failed to read directory:', e)
       return nodes
     }
-    console.log('[Tabs] Found entries:', entries.length)
-    
+
     for (const entry of entries) {
       if (entry.name.startsWith('.')) continue
       if (entry.name === 'node_modules') continue
@@ -222,11 +308,11 @@ export const useTabStore = defineStore('tabs', () => {
         path: fullPath,
         isDir: entry.isDirectory,
         children: [],
-        expanded: false
+        expanded: false,
       }
 
       if (entry.isDirectory) {
-        node.children = await buildFileTree(fullPath, depth + 1)
+        node.children = await this.buildFileTree(fullPath, depth + 1)
       }
 
       nodes.push(node)
@@ -239,15 +325,14 @@ export const useTabStore = defineStore('tabs', () => {
       return a.name.localeCompare(b.name)
     })
 
-    console.log('[Tabs] File tree built, nodes:', nodes.length)
     return nodes
   }
 
-  function buildVirtualFileTree(root: string): FileNode[] {
+  private buildVirtualFileTree(root: string): FileNode[] {
     const normalizedRoot = normalizePath(root)
     const rootNodes: FileNode[] = []
 
-    for (const filePath of virtualFiles.keys()) {
+    for (const filePath of this._virtualFiles.keys()) {
       const relativePath = filePath.startsWith(`${normalizedRoot}/`)
         ? filePath.substring(normalizedRoot.length + 1)
         : filePath
@@ -258,7 +343,7 @@ export const useTabStore = defineStore('tabs', () => {
       parts.forEach((part, index) => {
         currentPath = `${currentPath}/${part}`
         const isLast = index === parts.length - 1
-        let node = currentLevel.find(item => item.name === part)
+        let node = currentLevel.find((item) => item.name === part)
 
         if (!node) {
           node = {
@@ -266,7 +351,7 @@ export const useTabStore = defineStore('tabs', () => {
             path: currentPath,
             isDir: !isLast,
             children: [],
-            expanded: !isLast
+            expanded: !isLast,
           }
           currentLevel.push(node)
         }
@@ -281,89 +366,59 @@ export const useTabStore = defineStore('tabs', () => {
         if (!a.isDir && b.isDir) return 1
         return a.name.localeCompare(b.name)
       })
-      nodes.forEach(node => sortNodes(node.children))
+      nodes.forEach((node) => sortNodes(node.children))
     }
     sortNodes(rootNodes)
     return rootNodes
   }
 
-  function setSidebarView(view: 'tree' | 'tabs'): void {
-    sidebarView.value = view
-    console.log('[Tabs] Sidebar view set to:', view)
+  setSidebarView(view: SidebarView): void {
+    this._sidebarView = view
+    this.emit()
   }
 
-  function setWorkingDirectory(dir: string): void {
-    console.log('[Tabs] setWorkingDirectory called:', dir)
-    workingDirectory.value = normalizePath(dir)
-    refreshFileTree()
+  setWorkingDirectory(dir: string): void {
+    this._workingDirectory = normalizePath(dir)
+    this.emit()
+    void this.refreshFileTree()
   }
 
-  async function setVirtualWorkspace(root: string, files: VirtualFile[]): Promise<void> {
+  async setVirtualWorkspace(root: string, files: VirtualFile[]): Promise<void> {
     const normalizedRoot = normalizePath(root)
-    tabs.value = []
-    activeTabId.value = null
-    virtualFiles.clear()
-    workingDirectory.value = normalizedRoot
+    this._tabs = []
+    this._activeTabId = null
+    this._virtualFiles.clear()
+    this._workingDirectory = normalizedRoot
 
     for (const file of files) {
-      virtualFiles.set(normalizePath(file.path), file.content)
+      this._virtualFiles.set(normalizePath(file.path), file.content)
     }
 
-    fileTree.value = buildVirtualFileTree(normalizedRoot)
-    const firstFile = files.find(file => normalizePath(file.path).endsWith('.md'))
+    this._fileTree = this.buildVirtualFileTree(normalizedRoot)
+    this.emit()
+
+    const firstFile = files.find((file) => normalizePath(file.path).endsWith('.md'))
     if (firstFile) {
-      await openFile(firstFile.path)
+      await this.openFile(firstFile.path)
     }
   }
 
-  function toggleFileNode(nodePath: string): void {
-    const node = findNodeInTree(fileTree.value, nodePath)
+  toggleFileNode(nodePath: string): void {
+    const node = findNodeInTree(this._fileTree, nodePath)
     if (node) {
       node.expanded = !node.expanded
+      this.emit()
     }
   }
 
-  function findNodeInTree(nodes: FileNode[], targetPath: string): FileNode | undefined {
-    for (const node of nodes) {
-      if (node.path === targetPath) return node
-      if (node.isDir && node.children) {
-        const found = findNodeInTree(node.children, targetPath)
-        if (found) return found
-      }
-    }
-    return undefined
+  findNode(targetPath: string): FileNode | undefined {
+    return findNodeInTree(this._fileTree, normalizePath(targetPath))
   }
 
-  function findNode(targetPath: string): FileNode | undefined {
-    return findNodeInTree(fileTree.value, normalizePath(targetPath))
-  }
-
-  function openFileFromTree(path: string): void {
+  openFileFromTree(path: string): void {
     if (!path.endsWith('.md')) return
-    openFile(path).catch(console.error)
+    this.openFile(path).catch(console.error)
   }
+}
 
-  return {
-    tabs,
-    activeTabId,
-    workingDirectory,
-    fileTree,
-    sidebarView,
-    activeTab,
-    activeContent,
-    openFile,
-    newTab,
-    closeTab,
-    setActiveTab,
-    updateTabContent,
-    saveActiveTab,
-    buildFileTree,
-    refreshFileTree,
-    setSidebarView,
-    setWorkingDirectory,
-    setVirtualWorkspace,
-    toggleFileNode,
-    findNode,
-    openFileFromTree
-  }
-})
+export const tabStore = new TabStore()
