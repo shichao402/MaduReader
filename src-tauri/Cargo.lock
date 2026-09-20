@@ -2085,6 +2085,7 @@ name = "madureader"
 version = "0.1.0"
 dependencies = [
  "dirs",
+ "log",
  "serde",
  "serde_json",
  "tauri",
@@ -2095,6 +2096,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-shell",
  "tokio",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

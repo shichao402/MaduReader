@@ -104,7 +104,43 @@ fn set_tray_theme(app: tauri::AppHandle, dark: bool) -> Result<(), String> {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// 进程创建到 run() 进入的耗时（exe 加载 + 静态初始化段，Defender 实时扫描主要发生在这一段）。
+/// 通过 GetProcessTimes 取进程创建时刻，与当前时间做差；日志插件未就绪，由 setup 内统一输出。
+#[cfg(windows)]
+fn process_start_elapsed_ms() -> Option<u64> {
+    use windows_sys::Win32::Foundation::FILETIME;
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
+
+    let mut creation = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
+    let mut exit = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
+    let mut kernel = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
+    let mut user = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
+
+    unsafe {
+        if GetProcessTimes(GetCurrentProcess(), &mut creation, &mut exit, &mut kernel, &mut user) == 0 {
+            return None;
+        }
+    }
+
+    let created = ((creation.dwHighDateTime as u64) << 32) | creation.dwLowDateTime as u64;
+    let now_unix_100ns = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_nanos() as u64
+        / 100;
+    // FILETIME 纪元（1601-01-01）与 UNIX 纪元相差的 100ns 数
+    const EPOCH_DIFF_100NS: u64 = 116_444_736_000_000_000;
+    let now_filetime = now_unix_100ns + EPOCH_DIFF_100NS;
+    if now_filetime <= created {
+        return None;
+    }
+    Some((now_filetime - created) / 10_000)
+}
+
 pub fn run() {
+    let boot_start = std::time::Instant::now();
+    #[cfg(windows)]
+    let process_load_ms = process_start_elapsed_ms();
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
@@ -122,6 +158,16 @@ pub fn run() {
                 .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne)
                 .build(),
         )
+        // 探针插件：注册在 log 之后，其 initialize 完成即「插件全部就绪」，
+        // 与 setup entered 之差即「主窗口 + WebView2 创建」耗时
+        .plugin(
+            tauri::plugin::Builder::new("startup-probe")
+                .setup(move |_app, _api: tauri::plugin::PluginApi<tauri::Wry, ()>| {
+                    log::info!("[perf] rust: plugins ready at +{:?}", boot_start.elapsed());
+                    Ok(())
+                })
+                .build(),
+        )
         .invoke_handler(tauri::generate_handler![
             get_args,
             app_data_dir,
@@ -130,7 +176,12 @@ pub fn run() {
             read_data_file,
             write_data_file
         ])
-        .setup(|app| {
+        .setup(move |app| {
+            #[cfg(windows)]
+            if let Some(ms) = process_load_ms {
+                log::info!("[perf] rust: process->run() = {}ms (exe 加载/静态初始化段)", ms);
+            }
+            log::info!("[perf] rust: setup entered at +{:?}", boot_start.elapsed());
             #[cfg(desktop)]
             {
                 let show =
@@ -160,6 +211,7 @@ pub fn run() {
                     })
                     .build(app)?;
             }
+            log::info!("[perf] rust: setup done at +{:?}", boot_start.elapsed());
             Ok(())
         })
         .run(tauri::generate_context!())
