@@ -39,4 +39,8 @@ describe('OpenFilesGroup - dirOf', () => {
   it('should return empty string for top-level files', () => {
     expect(dirOf('README.md')).toBe('')
   })
+
+  it('should fall back to "." for top-level files when duplicated', () => {
+    expect(dirOf(toRelative('/root/a.md', '/root')) || '.').toBe('.')
+  })
 })

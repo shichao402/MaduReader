@@ -69,7 +69,8 @@ export default function OpenFilesGroup({
         <div className="flex flex-col gap-0.5">
           {tabs.map((tab) => {
             const rel = toRelative(tab.path, workingDirectory)
-            const sub = dupNames.has(tab.name) ? dirOf(rel) : ''
+            // 重名时顶层文件也要有标识，否则与带副标题的条目行高不一致且含义含糊
+            const sub = dupNames.has(tab.name) ? dirOf(rel) || '.' : ''
             return (
             <div
               key={tab.id}
