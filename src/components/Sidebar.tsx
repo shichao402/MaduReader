@@ -4,12 +4,11 @@ import {
   ArrowLeftRight,
   RefreshCw,
   Folder,
-  FileStack,
   ListTree,
 } from 'lucide-react'
 import { cn } from '../lib/utils'
 import FileTree, { type FileNode } from './FileTree'
-import TabList, { type Tab } from './TabList'
+import OpenFilesGroup, { type Tab } from './OpenFilesGroup'
 
 export interface Heading {
   level: number
@@ -34,7 +33,7 @@ export function extractHeadings(source: string): Heading[] {
   return headings
 }
 
-type SidebarView = 'tree' | 'tabs' | 'outline'
+type SidebarView = 'tree' | 'outline'
 
 interface SidebarProps {
   view: SidebarView
@@ -105,7 +104,6 @@ export default function Sidebar({
   const segments: { key: SidebarView; label: string; icon: typeof Folder }[] = [
     { key: 'tree', label: '目录', icon: Folder },
     { key: 'outline', label: '大纲', icon: ListTree },
-    { key: 'tabs', label: '打开的文件', icon: FileStack },
   ]
 
   return (
@@ -169,22 +167,24 @@ export default function Sidebar({
       {/* 视图内容 */}
       <div className="flex-1 overflow-y-auto overflow-x-hidden">
         {view === 'tree' ? (
-          <FileTree
-            nodes={fileTree}
-            workingDirectory={workingDirectory}
-            activePath={activePath}
-            onOpenFile={onOpenFile}
-            onToggleNode={onToggleNode}
-          />
-        ) : view === 'outline' ? (
-          <OutlineList source={tabs.find((t) => t.id === activeTabId)?.content ?? ''} />
+          <>
+            <OpenFilesGroup
+              tabs={tabs}
+              activeTabId={activeTabId}
+              workingDirectory={workingDirectory}
+              onCloseTab={onCloseTab}
+              onSetActive={onSetActiveTab}
+            />
+            <FileTree
+              nodes={fileTree}
+              workingDirectory={workingDirectory}
+              activePath={activePath}
+              onOpenFile={onOpenFile}
+              onToggleNode={onToggleNode}
+            />
+          </>
         ) : (
-          <TabList
-            tabs={tabs}
-            activeTabId={activeTabId}
-            onCloseTab={onCloseTab}
-            onSetActive={onSetActiveTab}
-          />
+          <OutlineList source={tabs.find((t) => t.id === activeTabId)?.content ?? ''} />
         )}
       </div>
     </div>

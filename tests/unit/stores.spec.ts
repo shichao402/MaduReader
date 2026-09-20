@@ -179,9 +179,9 @@ describe('Stores', () => {
 
     describe('setSidebarView', () => {
       it('should set sidebar view to tabs', () => {
-        store.setSidebarView('tabs')
+        store.setSidebarView('outline')
         
-        expect(store.sidebarView).toBe('tabs')
+        expect(store.sidebarView).toBe('outline')
       })
 
       it('should set sidebar view to tree', () => {

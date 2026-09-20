@@ -495,9 +495,9 @@ describe('TabStore - Direct Coverage', () => {
 
   describe('setSidebarView - Direct Coverage', () => {
     it('should set sidebar view to tabs', async () => {
-      await store.setSidebarView('tabs')
+      await store.setSidebarView('outline')
       
-      expect(store.sidebarView).toBe('tabs')
+      expect(store.sidebarView).toBe('outline')
     })
 
     it('should set sidebar view to tree', async () => {
@@ -507,14 +507,14 @@ describe('TabStore - Direct Coverage', () => {
     })
 
     it('should toggle sidebar view', async () => {
-      await store.setSidebarView('tabs')
-      expect(store.sidebarView).toBe('tabs')
+      await store.setSidebarView('outline')
+      expect(store.sidebarView).toBe('outline')
       
       await store.setSidebarView('tree')
       expect(store.sidebarView).toBe('tree')
       
-      await store.setSidebarView('tabs')
-      expect(store.sidebarView).toBe('tabs')
+      await store.setSidebarView('outline')
+      expect(store.sidebarView).toBe('outline')
     })
 
     it('should handle invalid view type gracefully', async () => {
@@ -585,8 +585,8 @@ describe('TabStore - Direct Coverage', () => {
     it('should handle unicode file names', async () => {
       const unicodeFiles = [
         '中文.md',
-        '日本語.md',
-        '한국어.md',
+        '日本�?md',
+        '한국�?md',
         'emoji🎉.md',
       ]
       

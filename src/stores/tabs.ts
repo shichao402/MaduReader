@@ -23,7 +23,7 @@ export interface VirtualFile {
   content: string
 }
 
-type SidebarView = 'tree' | 'tabs'
+type SidebarView = 'tree' | 'outline'
 type Listener = () => void
 
 function normalizePath(path: string): string {

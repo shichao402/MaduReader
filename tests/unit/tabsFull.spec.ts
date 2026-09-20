@@ -211,28 +211,28 @@ describe('tabs store - Full Coverage', () => {
   })
 
   describe('setSidebarView - Full Coverage', () => {
-    it('should set sidebar view to tabs', async () => {
-      let view = 'tree'
-      view = 'tabs'
-      
-      expect(view).toBe('tabs')
+    it('should set sidebar view to outline', async () => {
+      let view: 'tree' | 'outline' = 'tree'
+      view = 'outline'
+
+      expect(view).toBe('outline')
     })
 
     it('should set sidebar view to tree', async () => {
-      let view = 'tabs'
+      let view: 'tree' | 'outline' = 'outline'
       view = 'tree'
-      
+
       expect(view).toBe('tree')
     })
 
     it('should toggle sidebar view', async () => {
-      let view = 'tabs'
-      
-      view = view === 'tabs' ? 'tree' : 'tabs'
+      let view: 'tree' | 'outline' = 'outline'
+
+      view = view === 'outline' ? 'tree' : 'outline'
       expect(view).toBe('tree')
-      
-      view = view === 'tabs' ? 'tree' : 'tabs'
-      expect(view).toBe('tabs')
+
+      view = view === 'outline' ? 'tree' : 'outline'
+      expect(view).toBe('outline')
     })
   })
 

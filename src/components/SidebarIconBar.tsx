@@ -3,6 +3,7 @@ import { cn } from '../lib/utils'
 export default function SidebarIconBar({
   sidebarPosition,
   isDark,
+  activeView,
   onSetView,
   onToggleTheme,
   onRefreshTree,
@@ -10,11 +11,15 @@ export default function SidebarIconBar({
 }: {
   sidebarPosition: 'left' | 'right'
   isDark: boolean
-  onSetView: (view: 'tree' | 'tabs') => void
+  activeView: 'tree' | 'outline'
+  onSetView: (view: 'tree' | 'outline') => void
   onToggleTheme: () => void
   onRefreshTree: () => void
   onExpand: () => void
 }) {
+  const btnActive =
+    'w-9 h-9 flex items-center justify-center rounded-md bg-transparent border-none text-[color:var(--color-primary)] hover:bg-[color:var(--color-sidebar-hover)] transition-colors'
+
   const btn =
     'w-9 h-9 flex items-center justify-center rounded-md bg-transparent border-none text-[color:var(--color-text-secondary)] hover:bg-[color:var(--color-sidebar-hover)] hover:text-[color:var(--color-text-primary)] transition-colors'
 
@@ -27,11 +32,19 @@ export default function SidebarIconBar({
           : 'order-2 border-l border-[color:var(--color-border-base)]',
       )}
     >
-      <button className={btn} title="目录树" onClick={() => onSetView('tree')}>
+      <button
+        className={activeView === 'tree' ? btnActive : btn}
+        title="目录"
+        onClick={() => onSetView('tree')}
+      >
         <FolderIcon />
       </button>
-      <button className={btn} title="打开的文件" onClick={() => onSetView('tabs')}>
-        <TabsIcon />
+      <button
+        className={activeView === 'outline' ? btnActive : btn}
+        title="大纲"
+        onClick={() => onSetView('outline')}
+      >
+        <OutlineIcon />
       </button>
       <button className={btn} title="切换主题" onClick={onToggleTheme}>
         {isDark ? <SunIcon /> : <MoonIcon />}
@@ -53,11 +66,12 @@ function FolderIcon() {
     </svg>
   )
 }
-function TabsIcon() {
+function OutlineIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <polyline points="14 2 14 8 20 8" />
+      <path d="M4 6h10M4 12h16M4 18h10" />
+      <circle cx="19" cy="6" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="19" cy="18" r="1.5" fill="currentColor" stroke="none" />
     </svg>
   )
 }

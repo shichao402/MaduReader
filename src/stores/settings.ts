@@ -15,7 +15,7 @@ export interface Settings {
   zoom: number
   sidebarCollapsed: boolean
   sidebarPosition: 'left' | 'right'
-  sidebarView: 'tree' | 'tabs'
+  sidebarView: 'tree' | 'outline'
   codeHighlightTheme: string
   showLineNumbers: boolean
   autoSave: boolean

@@ -102,7 +102,7 @@ export default function App() {
   const [sidebarPosition, setSidebarPosition] = useState<'left' | 'right'>('left')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
-  const [sidebarView, setSidebarView] = useState<'tree' | 'tabs' | 'outline'>('outline')
+  const [sidebarView, setSidebarView] = useState<'tree' | 'outline'>('outline')
 
   // 初始化
   useEffect(() => {
@@ -217,7 +217,9 @@ export default function App() {
         <SidebarIconBar
           sidebarPosition={sidebarPosition}
           isDark={settingsStore.isDark}
+          activeView={sidebarView}
           onSetView={(view) => {
+            setSidebarView(view)
             tabStore.setSidebarView(view)
             toggleSidebar()
           }}

@@ -295,8 +295,8 @@ describe('TabStore - Additional Coverage', () => {
 
   describe('sidebarView coverage', () => {
     it('should toggle sidebar view', () => {
-      store.setSidebarView('tabs')
-      expect(store.sidebarView).toBe('tabs')
+      store.setSidebarView('outline')
+      expect(store.sidebarView).toBe('outline')
       
       store.setSidebarView('tree')
       expect(store.sidebarView).toBe('tree')
