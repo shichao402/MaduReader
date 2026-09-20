@@ -59,6 +59,7 @@ type Draft = Pick<
   | 'codeHighlightTheme'
   | 'showLineNumbers'
   | 'restoreSession'
+  | 'closeToTray'
   | 'mermaidConfig'
   | 'plantUmlServer'
   | 'proxyEnabled'
@@ -95,6 +96,7 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
         showLineNumbers: false,
         autoSave: false,
         restoreSession: true,
+        closeToTray: true,
         mermaidConfig: {
           theme: 'default',
           securityLevel: 'loose',
@@ -147,6 +149,7 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
     codeHighlightTheme: s.codeHighlightTheme,
     showLineNumbers: s.showLineNumbers,
     restoreSession: s.restoreSession,
+    closeToTray: s.closeToTray,
     mermaidConfig: s.mermaidConfig,
     plantUmlServer: s.plantUmlServer,
     proxyEnabled: s.proxyEnabled,
@@ -195,6 +198,14 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
                   onChange={(e) => commit({ restoreSession: e.target.checked })}
                 />
                 启动时恢复上次的目录和打开的文件
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer text-sm mb-3">
+                <input
+                  type="checkbox"
+                  checked={draft.closeToTray}
+                  onChange={(e) => commit({ closeToTray: e.target.checked })}
+                />
+                关闭窗口时驻留托盘（再次启动秒开）
               </label>
               <div className="mb-3">
                 <label className={label}>字体大小</label>

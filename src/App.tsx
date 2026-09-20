@@ -156,9 +156,29 @@ export default function App() {
         if (isTauri) {
           try {
             const { invoke } = await import('@tauri-apps/api/core')
-            const args = await invoke<string[]>('get_args')
-            if (args && args.length > 0 && args[0]) {
-              const path = args[0]
+            // 上报页面真实 URL：内容卸载（about:blank）后 JS 上下文销毁，
+            // Rust 唤醒时只能靠这里记录的地址导航回应用页面
+            void invoke('set_app_url', { url: window.location.href }).catch(() => {})
+            // 常驻唤醒：优先取 single-instance 转发的待打开路径；首次冷启动回退 get_args
+            let path: string | null = null
+            try {
+              const pending = await invoke<string | null>('get_pending_open')
+              void import('./lib/perfLog').then(({ perfLog }) =>
+                perfLog(`frontend: get_pending_open -> ${JSON.stringify(pending)}`),
+              )
+              if (pending) {
+                path = pending
+              }
+            } catch {
+              // 命令不可用时忽略，走 get_args
+            }
+            if (!path) {
+              const args = await invoke<string[]>('get_args')
+              if (args && args.length > 0 && args[0]) {
+                path = args[0]
+              }
+            }
+            if (path) {
               const { allowAndReadDir, allowPath, isDirectory } = await import('./lib/fsAccess')
               const isDir = await isDirectory(path)
               if (isDir) {
@@ -197,6 +217,9 @@ export default function App() {
             }
           } catch (e) {
             console.error('[MaduReader] Failed to process args:', e)
+            void import('./lib/perfLog').then(({ perfLog }) =>
+              perfLog(`frontend: init args error: ${String(e)}`),
+            )
           }
         } else {
           await tabStore.setVirtualWorkspace('web-demo', demoFiles)
@@ -243,11 +266,37 @@ export default function App() {
         )
       }, 500)
     }
+    // 点 X 驻留托盘前，Rust 侧会立即触发本事件：不等防抖，马上落盘会话
+    const flushNow = () => {
+      window.clearTimeout(timer)
+      const settingsStore = getSettingsStore()
+      if (!settingsStore.settings.restoreSession) return
+      void import('./lib/session').then(({ saveSession }) =>
+        saveSession(getTabStore().snapshotSession()),
+      )
+    }
+    window.addEventListener('madu:hide-before-close', flushNow)
     const unsubscribe = getTabStore().subscribe(persist)
     return () => {
+      window.removeEventListener('madu:hide-before-close', flushNow)
       unsubscribe()
       window.clearTimeout(timer)
     }
+  }, [])
+
+  // 常驻进程运行期间，二次启动（双击 md/命令行）由 Rust 侧直接推事件打开文件；
+  // 复用拖拽打开逻辑（目录/文件统一处理）
+  useEffect(() => {
+    if (!isTauri) return
+    const handler = (e: Event) => {
+      const path = (e as CustomEvent<string>).detail
+      if (!path) return
+      void handleDroppedPaths([path]).catch((err) => {
+        console.error('[MaduReader] Failed to open path from resident event:', err)
+      })
+    }
+    window.addEventListener('madu:open-path', handler)
+    return () => window.removeEventListener('madu:open-path', handler)
   }, [])
 
   // 拖拽打开：WebView2 新内核已移除 File.path，必须用 Tauri 的拖放事件拿真实路径

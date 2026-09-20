@@ -20,6 +20,7 @@ export interface Settings {
   showLineNumbers: boolean
   autoSave: boolean
   restoreSession: boolean
+  closeToTray: boolean
   mermaidConfig: MermaidConfig
   plantUmlServer: string
   proxyEnabled: boolean
@@ -38,6 +39,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showLineNumbers: false,
   autoSave: false,
   restoreSession: true,
+  closeToTray: true,
   mermaidConfig: {
     theme: 'default',
     securityLevel: 'loose',
