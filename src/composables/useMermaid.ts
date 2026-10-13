@@ -40,6 +40,15 @@ function nextMermaidId(): string {
   return `mermaid-${Date.now()}-${renderCounter}`
 }
 
+function adoptMermaidSvg(svg: string, owner: Document): Element | null {
+  const parsed = new DOMParser().parseFromString(svg, 'text/html')
+  const found = parsed.body.querySelector('svg')
+  if (!found) return null
+  const svgElement = owner.importNode(found, true)
+  svgElement.classList.add('mermaid-svg')
+  return svgElement
+}
+
 export async function initMermaid(): Promise<void> {
   if (initialized) return
 
@@ -85,7 +94,7 @@ export async function renderMermaidCode(html: string): Promise<string> {
     
     try {
       const { svg } = await mermaid.render(nextMermaidId(), codeContent)
-      const svgElement = parser.parseFromString(svg, 'text/html').body.firstChild
+      const svgElement = adoptMermaidSvg(svg, doc)
       if (svgElement) {
         pre.replaceWith(svgElement)
       }
@@ -110,8 +119,7 @@ export async function renderMermaidElement(element: Element): Promise<void> {
   
   try {
     const { svg } = await mermaid.render(nextMermaidId(), codeContent)
-    const parser = new DOMParser()
-    const svgElement = parser.parseFromString(svg, 'text/html').body.firstChild
+    const svgElement = adoptMermaidSvg(svg, element.ownerDocument)
     if (svgElement) {
       element.replaceWith(svgElement)
     }
@@ -136,8 +144,7 @@ export async function renderAllMermaid(): Promise<void> {
     
     try {
       const { svg } = await mermaid.render(nextMermaidId(), codeContent)
-      const parser = new DOMParser()
-      const svgElement = parser.parseFromString(svg, 'text/html').body.firstChild
+      const svgElement = adoptMermaidSvg(svg, document)
       if (svgElement) {
         pre.replaceWith(svgElement)
       }

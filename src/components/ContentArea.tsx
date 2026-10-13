@@ -6,7 +6,9 @@ import { renderMarkdownAsync, initCodeCopy } from '../composables/useMarkdown'
 import { renderMermaidCode } from '../composables/useMermaid'
 import { renderPlantUmlCode } from '../composables/usePlantUml'
 import { attachLinkHandler, detachLinkHandler } from '../composables/useLinkHandler'
+import { decorateViewableMedia, mediaPayloadFromEventTarget, type MediaPayload } from '../lib/mediaView'
 import ExportDialog from './ExportDialog'
+import MediaLightbox from './MediaLightbox'
 import { cn } from '../lib/utils'
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
@@ -52,6 +54,7 @@ export default function ContentArea({
   const [currentSlide, setCurrentSlide] = useState(0)
   const [exportOpen, setExportOpen] = useState(false)
   const [isEmpty, setIsEmpty] = useState(true)
+  const [mediaView, setMediaView] = useState<MediaPayload | null>(null)
 
   const zoom = (settingsStore.currentZoom ?? 100) / 100
   const slides = useMemo(
@@ -95,6 +98,7 @@ export default function ContentArea({
         html = await renderMermaidCode(html)
         html = renderPlantUmlCode(html, settingsStore.settings.plantUmlServer)
         html = await resolveLocalImageSources(html, tabStore.activeTab.path)
+        html = decorateViewableMedia(html)
         if (!cancelled) setRenderedContent(html)
       } catch (e) {
         console.error('[ContentArea] Render error:', e)
@@ -108,12 +112,25 @@ export default function ContentArea({
     }
   }, [tabStore.activeContent, slideMode, currentSlide, hasSlides, slides])
 
-  // 渲染完成后重新绑定链接处理
+  // 渲染完成后重新绑定链接处理，并在捕获阶段接管图表/图片点击
   useEffect(() => {
     if (!contentRef.current) return
     const el = contentRef.current
     detachLinkHandler(el)
     attachLinkHandler(el)
+    const onMediaClick = (event: Event) => {
+      const payload = mediaPayloadFromEventTarget(event.target)
+      if (!payload) return
+      event.preventDefault()
+      event.stopPropagation()
+      setMediaView(payload)
+    }
+    el.addEventListener('click', onMediaClick, true)
+    return () => el.removeEventListener('click', onMediaClick, true)
+  }, [renderedContent])
+
+  useEffect(() => {
+    setMediaView(null)
   }, [renderedContent])
 
   // 缩放
@@ -127,6 +144,7 @@ export default function ContentArea({
   // 快捷键
   useEffect(() => {
     function handleKeydown(e: KeyboardEvent) {
+      if (mediaView) return
       const settingsStore = getSettingsStore()
       if (slideMode && hasSlides) {
         if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') {
@@ -164,7 +182,7 @@ export default function ContentArea({
     }
     document.addEventListener('keydown', handleKeydown)
     return () => document.removeEventListener('keydown', handleKeydown)
-  }, [slideMode, hasSlides, slides.length, findText])
+  }, [slideMode, hasSlides, slides.length, findText, mediaView])
 
   // 幻灯片/页切换时重置页码
   useEffect(() => {
@@ -524,6 +542,8 @@ export default function ContentArea({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {mediaView && <MediaLightbox payload={mediaView} onClose={() => setMediaView(null)} />}
 
       <ExportDialog open={exportOpen} onOpenChange={setExportOpen} renderedHtml={renderedContent} />
     </div>
