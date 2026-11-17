@@ -19,7 +19,8 @@ export interface PreparedSvg {
 }
 
 export const MIN_VIEW_SCALE = 0.2
-export const MAX_VIEW_SCALE = 8
+// 矢量图（Mermaid / PlantUML SVG）放大不失真，上限只用来防止 scale 溢出到 Infinity 或丢精度，实际等同不设限
+export const MAX_VIEW_SCALE = 1000
 
 const EXPAND_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>`
 

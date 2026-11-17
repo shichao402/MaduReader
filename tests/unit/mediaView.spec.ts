@@ -87,6 +87,13 @@ describe('view transform', () => {
     expect((cursorY - next.y) / next.scale).toBeCloseTo(beforeY)
   })
 
+  it('可以放大到远超 800%', () => {
+    let t = { scale: 8, x: 0, y: 0 }
+    for (let i = 0; i < 10; i++) t = zoomBy(t, 1.2, 10, 10)
+    expect(t.scale).toBeGreaterThan(40)
+    expect(MAX_VIEW_SCALE).toBeGreaterThanOrEqual(100)
+  })
+
   it('缩放到边界后不再变化', () => {
     const maxed = zoomBy({ scale: MAX_VIEW_SCALE, x: 0, y: 0 }, 2, 10, 10)
     const mined = zoomBy({ scale: MIN_VIEW_SCALE, x: 0, y: 0 }, 0.5, 10, 10)
