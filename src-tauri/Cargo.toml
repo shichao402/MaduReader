@@ -11,8 +11,15 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+# relkit ADR 0026：宿主从仓内 proto 副本自行生成 updater 协议类型
+prost-build = "0.13"
+pbjson-build = "0.7"
+protoc-bin-vendored = "3"
 
 [dependencies]
+prost = "0.13"
+pbjson = "0.7"
+pbjson-types = "0.7"
 tauri = { version = "2.9", features = ["tray-icon", "image-png"] }
 tauri-plugin-shell = "2.3"
 tauri-plugin-dialog = "2.4"

@@ -1,0 +1,2 @@
+# proto 副本做跨平台字节比对，必须固定 LF
+*.proto text eol=lf

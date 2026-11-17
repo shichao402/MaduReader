@@ -2,6 +2,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { X } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { getSettingsStore } from '../bridge'
+import UpdateSection from './UpdateSection'
 import {
   getAssociationStatus,
   openDefaultAppsSettings,
@@ -455,6 +456,8 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
                 )}
               </div>
             </div>
+
+            <UpdateSection open={open} section={section} sectionTitle={sectionTitle} />
 
             <div className="flex flex-wrap gap-3 pt-5 border-t border-[color:var(--color-border-base)]">
               <button

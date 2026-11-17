@@ -1,3 +1,6 @@
+mod relkit_sidecar;
+mod updater;
+
 use std::env;
 use std::sync::Mutex;
 
@@ -468,8 +471,8 @@ mod windows_assoc {
 #[cfg(target_os = "macos")]
 mod macos_assoc {
     use super::{AssocStatus, ASSOC_EXTS};
-    use core_foundation::base::{CFStringRef, TCFType};
-    use core_foundation::string::CFString;
+    use core_foundation::base::TCFType;
+    use core_foundation::string::{CFString, CFStringRef};
 
     /// 系统内置的 Markdown UTI（macOS 10.13+）
     const UTI_MARKDOWN: &str = "net.daringfireball.markdown";
@@ -813,9 +816,18 @@ pub fn run() {
             write_data_file,
             association_status,
             set_file_association,
-            open_default_apps_settings
+            open_default_apps_settings,
+            updater::update_status,
+            updater::update_check,
+            updater::update_download,
+            updater::update_apply
         ])
         .setup(move |app| {
+            // Relkit 启动交接：引擎要求宿主让位（正在替换安装目录）时立即退出；问不到引擎一律放行
+            if updater::host_must_exit() {
+                log::warn!("[relkit] 引擎要求宿主退出（更新进行中），本次启动让位");
+                std::process::exit(0);
+            }
             #[cfg(windows)]
             if let Some(ms) = process_load_ms {
                 log::info!("[perf] rust: process->run() = {}ms (exe 加载/静态初始化段)", ms);
@@ -823,6 +835,8 @@ pub fn run() {
             log::info!("[perf] rust: setup entered at +{:?}", boot_start.elapsed());
 
             app.manage(ResidentState::new());
+            app.manage(updater::UpdateState::new(app.handle()));
+            updater::start(app.handle());
 
             // 记录应用页面前端 URL（dev 为 devUrl，release 为 tauri://localhost），唤醒导航用；
             // 前端 init 时还会通过 set_app_url 上报更可靠的地址

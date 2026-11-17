@@ -38,3 +38,7 @@ rustup-init.exe
 # Unified temp workspace: e2e screenshots / coverage / dev logs (see .tmp/README.md)
 .tmp/*
 !.tmp/README.md
+
+# Relkit：CI 取回的工具 / bootstrap / 产出，以及构建期 stage 的 updater 二进制
+.relkit/
+src-tauri/binaries/
