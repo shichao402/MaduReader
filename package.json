@@ -1,6 +1,6 @@
 {
   "name": "madureader",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A minimalistic Markdown reader built with Tauri 2.x and React 19",
   "type": "module",
   "scripts": {
