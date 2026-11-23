@@ -6,6 +6,9 @@ import ContentArea from './components/ContentArea'
 import CommandPalette from './components/CommandPalette'
 import SettingsDialog from './components/SettingsDialog'
 import { startDirectorySync } from './lib/directorySync'
+import { openPaths, openUserPaths, type OpenErrorNotice } from './lib/openPaths'
+import { createOpenRequestReceiver } from './lib/openRequestReceiver'
+import OpenErrorBanner from './components/OpenErrorBanner'
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 
@@ -141,9 +144,13 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [sidebarView, setSidebarView] = useState<'tree' | 'outline'>('outline')
 
-  // 初始化
+  const [openError, setOpenError] = useState<OpenErrorNotice | null>(null)
+  const receiverRef = useRef<ReturnType<typeof createOpenRequestReceiver> | null>(null)
+
+  // 初始化：页面先注册，再按既有规则恢复，最后开始处理队列。
   useEffect(() => {
     let cancelled = false
+    let receiver: ReturnType<typeof createOpenRequestReceiver> | undefined
     async function init() {
       const bootT0 = performance.now()
       const settingsStore = getSettingsStore()
@@ -159,73 +166,32 @@ export default function App() {
         setSidebarWidth(settingsStore.settings.sidebarWidth)
         widthLoadedRef.current = true
         if (isTauri) {
-          try {
-            const { invoke } = await import('@tauri-apps/api/core')
-            // 上报页面真实 URL：内容卸载（about:blank）后 JS 上下文销毁，
-            // Rust 唤醒时只能靠这里记录的地址导航回应用页面
-            void invoke('set_app_url', { url: window.location.href }).catch(() => {})
-            // 常驻唤醒：优先取 single-instance 转发的待打开路径；首次冷启动回退 get_args
-            let path: string | null = null
-            try {
-              const pending = await invoke<string | null>('get_pending_open')
-              void import('./lib/perfLog').then(({ perfLog }) =>
-                perfLog(`frontend: get_pending_open -> ${JSON.stringify(pending)}`),
-              )
-              if (pending) {
-                path = pending
-              }
-            } catch {
-              // 命令不可用时忽略，走 get_args
-            }
-            if (!path) {
-              const args = await invoke<string[]>('get_args')
-              if (args && args.length > 0 && args[0]) {
-                path = args[0]
-              }
-            }
-            if (path) {
-              const { allowAndReadDir, allowPath, isDirectory } = await import('./lib/fsAccess')
-              const isDir = await isDirectory(path)
-              if (isDir) {
-                tabStore.setWorkingDirectory(path)
-                const files = await allowAndReadDir(path)
-                const mdFiles = files.filter((f: { name: string }) => f.name.endsWith('.md'))
-                if (mdFiles.length > 0) {
-                  const readme = mdFiles.find(
-                    (f: { name: string }) => f.name.toLowerCase() === 'readme.md',
-                  )
-                  const target = readme || mdFiles[0]
-                  const fullPath = path.endsWith('/')
-                    ? `${path}/${target.name}`
-                    : `${path}/${target.name}`
-                  await tabStore.openFile(fullPath)
-                }
-              } else {
-                await allowPath(path)
-                await tabStore.openFile(path)
-                const lastSlash = path.lastIndexOf('/')
-                tabStore.setWorkingDirectory(lastSlash > 0 ? path.substring(0, lastSlash) : '')
-              }
-            } else if (settingsStore.settings.restoreSession) {
+          const { invoke } = await import('@tauri-apps/api/core')
+          const { listen } = await import('@tauri-apps/api/event')
+          if (cancelled) return
+          receiver = createOpenRequestReceiver({
+            invoke,
+            listen: (notify) => listen('madu:open-requests', notify),
+            url: window.location.href,
+            execute: (paths) => openPaths(paths),
+            onError: (notice) => { if (!cancelled) setOpenError(notice) },
+            initialize: async (hasRequests) => {
+              if (hasRequests || !settingsStore.settings.restoreSession) return
               const { loadSession } = await import('./lib/session')
               const session = await loadSession()
               if (cancelled) return
-              if (session.openPaths.length > 0 || session.workingDirectory) {
+              if (session.openPaths.length || session.workingDirectory) {
                 const restoreT0 = performance.now()
                 await tabStore.restoreSession(session)
                 void import('./lib/perfLog').then(({ perfLog }) =>
-                  perfLog(
-                    `frontend: session restored (${session.openPaths.length} tabs) in ${(performance.now() - restoreT0).toFixed(0)}ms`,
-                  ),
+                  perfLog(`frontend: session restored (${session.openPaths.length} tabs) in ${(performance.now() - restoreT0).toFixed(0)}ms`),
                 )
               }
-            }
-          } catch (e) {
-            console.error('[MaduReader] Failed to process args:', e)
-            void import('./lib/perfLog').then(({ perfLog }) =>
-              perfLog(`frontend: init args error: ${String(e)}`),
-            )
-          }
+            },
+            afterPaint: () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+          })
+          receiverRef.current = receiver
+          await receiver.start()
         } else {
           await tabStore.setVirtualWorkspace('web-demo', demoFiles)
           if (settingsStore.settings.restoreSession) {
@@ -239,23 +205,13 @@ export default function App() {
         }
       } catch (e) {
         console.error('[MaduReader] init error:', e)
-      } finally {
-        if (isTauri) {
-          // 常驻唤醒时 Rust 侧保持窗口隐藏等本信号：等两帧确保画面已绘制再上报，
-          // 窗口显示瞬间就是完整渲染内容，无白屏/半渲染外露
-          requestAnimationFrame(() =>
-            requestAnimationFrame(() => {
-              void import('@tauri-apps/api/core').then(({ invoke }) =>
-                invoke('app_ready').catch(() => {}),
-              )
-            }),
-          )
-        }
       }
     }
     init()
     return () => {
       cancelled = true
+      receiver?.stop()
+      if (receiverRef.current === receiver) receiverRef.current = null
     }
   }, [])
 
@@ -308,19 +264,11 @@ export default function App() {
     }
   }, [])
 
-  // 常驻进程运行期间，二次启动（双击 md/命令行）由 Rust 侧直接推事件打开文件；
-  // 复用拖拽打开逻辑（目录/文件统一处理）
+  // 对话框、侧栏等用户交互与外部请求使用相同的错误反馈。
   useEffect(() => {
-    if (!isTauri) return
-    const handler = (e: Event) => {
-      const path = (e as CustomEvent<string>).detail
-      if (!path) return
-      void handleDroppedPaths([path]).catch((err) => {
-        console.error('[MaduReader] Failed to open path from resident event:', err)
-      })
-    }
-    window.addEventListener('madu:open-path', handler)
-    return () => window.removeEventListener('madu:open-path', handler)
+    const handler = (event: Event) => setOpenError((event as CustomEvent<OpenErrorNotice>).detail)
+    window.addEventListener('madu:open-error', handler)
+    return () => window.removeEventListener('madu:open-error', handler)
   }, [])
 
   // 拖拽打开：WebView2 新内核已移除 File.path，必须用 Tauri 的拖放事件拿真实路径
@@ -335,7 +283,7 @@ export default function App() {
           if (event.payload.type === 'drop') {
             const paths = event.payload.paths
             if (paths.length > 0) {
-              void handleDroppedPaths(paths)
+              void openUserPaths(paths)
             }
           }
         })
@@ -353,45 +301,6 @@ export default function App() {
       unlisten?.()
     }
   }, [])
-
-  async function handleDroppedPaths(paths: string[]) {
-    const tabStore = getTabStore()
-    const { allowAndReadDir, allowPath, isDirectory } = await import('./lib/fsAccess')
-    // 目录：设为工作目录并构建文件树，打开第一个 md
-    let isDir = false
-    try {
-      isDir = await isDirectory(paths[0])
-    } catch {
-      isDir = false
-    }
-    if (isDir) {
-      tabStore.setWorkingDirectory(paths[0])
-      const files = await allowAndReadDir(paths[0])
-      const mdFiles = files.filter((f: { name: string }) =>
-        f.name.toLowerCase().endsWith('.md'),
-      )
-      if (mdFiles.length > 0) {
-        const readme = mdFiles.find(
-          (f: { name: string }) => f.name.toLowerCase() === 'readme.md',
-        )
-        const target = readme || mdFiles[0]
-        const sep = paths[0].includes('\\') ? '\\' : '/'
-        const fullPath = paths[0].endsWith(sep)
-          ? `${paths[0]}${target.name}`
-          : `${paths[0]}${sep}${target.name}`
-        await tabStore.openFile(fullPath)
-      }
-      return
-    }
-    // 文件：打开第一个 .md，同时把它所在目录设为工作目录
-    const mdPath = paths.find((p) => p.toLowerCase().endsWith('.md')) || paths[0]
-    await allowPath(mdPath)
-    await tabStore.openFile(mdPath)
-    const parentDir = mdPath.replace(/[\\/][^\\/]+$/, '')
-    if (parentDir && parentDir !== mdPath) {
-      tabStore.setWorkingDirectory(parentDir)
-    }
-  }
 
   // 侧栏宽度：拖拽中仅更新视图，停止 600ms 后写入设置，避免拖动过程高频落盘；
   // 用已加载标记守门，不能特判 280（否则双击复位到默认值反而不会持久化）
@@ -476,7 +385,7 @@ export default function App() {
             onCollapse={toggleSidebar}
             onTogglePosition={toggleSidebarPosition}
             onRefreshTree={() => tabStore.refreshFileTree()}
-            onOpenFile={(path) => tabStore.openFile(path)}
+            onOpenFile={(path) => { void openUserPaths([path], { updateWorkspace: false }) }}
             onToggleNode={(path) => tabStore.toggleFileNode(path)}
             onCloseTab={(id) => tabStore.closeTab(id)}
             onSetActiveTab={(id) => tabStore.setActiveTab(id)}
@@ -485,6 +394,11 @@ export default function App() {
       )}
 
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+        {openError && <OpenErrorBanner
+          notice={openError}
+          onDismiss={() => setOpenError(null)}
+          onRetry={() => { setOpenError(null); void receiverRef.current?.retry() }}
+        />}
         <ContentArea onOpenSettings={() => setSettingsOpen(true)} />
       </div>
 

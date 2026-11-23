@@ -11,6 +11,7 @@ import { attachInlineDiagrams, type InlineDiagramsController } from '../lib/inli
 import ExportDialog from './ExportDialog'
 import MediaLightbox from './MediaLightbox'
 import { cn } from '../lib/utils'
+import { openUserPaths } from '../lib/openPaths'
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 
@@ -299,38 +300,15 @@ export default function ContentArea({
       multiple: false,
     })
     if (path) {
-      await tabStore.openFile(path as string)
+      await openUserPaths([path as string])
     }
   }
 
   async function openDirectory() {
     if (!isTauri) return
-    const tabStore = getTabStore()
     const dialog = await import('@tauri-apps/plugin-dialog')
     const path = await dialog.open({ directory: true, multiple: false })
-    if (!path) return
-    const dir = path as string
-    tabStore.setWorkingDirectory(dir)
-    try {
-      const { allowAndReadDir } = await import('../lib/fsAccess')
-      const files = await allowAndReadDir(dir)
-      const mdFiles = files.filter((f: { name: string }) =>
-        f.name.toLowerCase().endsWith('.md'),
-      )
-      if (mdFiles.length > 0) {
-        const readme = mdFiles.find(
-          (f: { name: string }) => f.name.toLowerCase() === 'readme.md',
-        )
-        const target = readme || mdFiles[0]
-        const sep = dir.includes('\\') ? '\\' : '/'
-        const fullPath = dir.endsWith(sep)
-          ? `${dir}${target.name}`
-          : `${dir}${sep}${target.name}`
-        await tabStore.openFile(fullPath)
-      }
-    } catch (e) {
-      console.error('[ContentArea] Failed to open directory:', e)
-    }
+    if (path) await openUserPaths([path as string])
   }
 
   function toggleSlideMode() {

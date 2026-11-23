@@ -40,13 +40,9 @@ export async function allowAndReadTextFile(path: string): Promise<string> {
   return fs.readTextFile(path)
 }
 
-/** 判断路径是否为目录（不做授权，存在性探测失败按非目录处理） */
+/** 显式授权后检查类型；存在性/权限错误向调用方传播，不伪装成普通文件。 */
 export async function isDirectory(path: string): Promise<boolean> {
-  try {
-    const fs = await fsModule()
-    await fs.readDir(path)
-    return true
-  } catch {
-    return false
-  }
+  await allowPath(path)
+  const fs = await fsModule()
+  return (await fs.stat(path)).isDirectory
 }

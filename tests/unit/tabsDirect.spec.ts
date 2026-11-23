@@ -211,16 +211,16 @@ describe('TabStore - Direct Coverage', () => {
       expect(store.tabs.length).toBe(1)
     })
 
-    it('should handle file open error', async () => {
+    it('should propagate a file open error without creating a tab', async () => {
       const fs = await import('@tauri-apps/plugin-fs')
       vi.mocked(fs.readTextFile).mockRejectedValue(new Error('File not found'))
-      
-      await store.openFile('/test/not-found.md')
-      
-      // Should handle error gracefully
-      expect(true).toBe(true)
+
+      await expect(store.openFile('/test/not-found.md')).rejects.toThrow('File not found')
+
+      expect(store.tabs).toHaveLength(0)
     })
   })
+
 
   describe('refreshFileTree - Direct Coverage', () => {
     it('should refresh file tree for current directory', async () => {

@@ -1,8 +1,9 @@
+mod open_protocol;
+mod resident;
 mod relkit_sidecar;
 mod updater;
 
 use std::env;
-use std::sync::Mutex;
 
 use tauri::{
     menu::{Menu, MenuItem},
@@ -13,223 +14,6 @@ use tauri::{
 /// 托盘图标（由 npm run icons 生成同步到 src-tauri/icons/，编译期嵌入）
 const TRAY_DARK: &[u8] = include_bytes!("../icons/tray-dark.png");
 const TRAY_LIGHT: &[u8] = include_bytes!("../icons/tray-light.png");
-
-/// 常驻 + 快速唤醒协议：
-/// - 点 X 关窗（或 Alt+F4）→ 窗口立即隐藏（体感即关），进程与 WebView2 环境常驻；500ms
-///   （前端会话落盘窗口）后把 WebView 导航到 about:blank，DOM/JS 堆整体释放。
-///   是否驻留由设置项 closeToTray 控制。
-/// - 再次启动 exe / 双击 md → single-instance 把参数转发给常驻进程后本进程立即退出，常驻进程
-///   导航回应用页面，前端 init 通过 get_pending_open 拿到路径直接打开。
-/// - 托盘左键 / "显示主窗口" → 内容已卸载则先导航回来，暂不显示窗口；等前端 init 完成、
-///   画面绘制后上报 app_ready 再显示（超时兜底强制显示），避免白屏/半渲染画面外露。
-const BLANK_URL: &str = "about:blank";
-/// 与前端会话防抖间隔（500ms）一致，保证隐藏前 session.json 已落盘
-const SESSION_SETTLE_MS: u64 = 500;
-
-/// 可变运行状态（Mutex 内部可变性：Tauri State 只提供共享引用）
-struct ResidentInner {
-    /// WebView 内容是否已卸载（隐藏 + about:blank），唤醒时据此决定是否导航回来
-    unloaded: bool,
-    /// 唤醒时窗口处于隐藏等待状态：app_ready 上报后再显示，超时兜底
-    pending_show: bool,
-    /// 应用页面前端 URL（dev 为 devUrl、release 为应用协议地址），唤醒导航用
-    app_url: String,
-    /// single-instance 转发的待打开路径，页面导航回来后由前端 init 消费（consume-once）
-    pending_open: Option<String>,
-    /// 原始命令行参数只消费一次：常驻唤醒后页面重载会再次调 get_args，
-    /// 不能再返回旧 argv，否则会反复打开启动参数文件而不是恢复最新会话
-    args_consumed: bool,
-    /// 关闭卸载流程的 500ms 等待窗口内若发生二次启动，取消隐藏/卸载
-    cancel_unload: bool,
-}
-
-impl ResidentInner {
-    fn new() -> Self {
-        Self {
-            unloaded: false,
-            pending_show: false,
-            app_url: String::new(),
-            pending_open: None,
-            args_consumed: false,
-            cancel_unload: false,
-        }
-    }
-}
-
-struct ResidentState {
-    inner: Mutex<ResidentInner>,
-}
-
-impl ResidentState {
-    fn new() -> Self {
-        Self {
-            inner: Mutex::new(ResidentInner::new()),
-        }
-    }
-
-    fn with_inner<R>(&self, f: impl FnOnce(&mut ResidentInner) -> R) -> R {
-        let mut guard = self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        f(&mut guard)
-    }
-}
-
-/// 读取「关闭窗口时驻留托盘」设置（config.json 由前端 write_data_file 维护）。
-/// 文件缺失/损坏/字段缺失时默认驻留（true）。
-fn close_to_tray_enabled() -> bool {
-    dirs::data_dir()
-        .map(|dir| dir.join("madureader").join("config.json"))
-        .and_then(|path| std::fs::read_to_string(path).ok())
-        .map(|text| text.trim_start_matches('\u{feff}').to_string())
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
-        .and_then(|value| value.get("closeToTray").and_then(|v| v.as_bool()))
-        .unwrap_or(true)
-}
-
-fn focus_main_window(app: &tauri::AppHandle) {
-    if let Some(win) = app.get_webview_window("main") {
-        let _ = win.unminimize();
-        let _ = win.set_focus();
-    }
-}
-
-/// 前端已在运行时，直接推 madu:open-path 事件打开路径（含目录/文件逻辑由前端统一处理）
-fn emit_open_path(app: &tauri::AppHandle, path: &str) {
-    if let Some(win) = app.get_webview_window("main") {
-        let payload = serde_json::to_string(&path).unwrap_or_else(|_| "\"\"".to_string());
-        let _ = win.eval(&format!(
-            "window.dispatchEvent(new CustomEvent('madu:open-path', {{ detail: {payload} }}))"
-        ));
-    }
-}
-
-/// 唤醒主窗口：若 WebView 内容已卸载（about:blank），先导航回应用页面再聚焦。
-/// 页面重新加载后前端 init 会自行调用 get_pending_open 处理待打开路径或会话恢复。
-/// 已卸载时窗口保持隐藏，等前端绘制完成后上报 app_ready 再显示（1s 超时兜底），
-/// 避免白屏/半渲染画面外露（画面撕裂感）。
-fn resume_main_window(app: &tauri::AppHandle) {
-    let mut wait_ready = false;
-    if let Some(state) = app.try_state::<ResidentState>() {
-        let app_url = state.with_inner(|inner| {
-            if inner.unloaded {
-                inner.unloaded = false;
-                inner.pending_show = true;
-                wait_ready = true;
-            }
-            inner.app_url.clone()
-        });
-        if let Some(win) = app.get_webview_window("main") {
-            match app_url.parse::<tauri::Url>() {
-                Ok(url) => {
-                    let _ = win.navigate(url);
-                    log::info!("[resident] webview navigating back to {}", app_url);
-                }
-                Err(_) => {
-                    let _ = win.eval("window.location.reload()");
-                }
-            }
-        }
-        if wait_ready {
-            let handle = app.clone();
-            std::thread::spawn(move || {
-                for _ in 0..20 {
-                    std::thread::sleep(std::time::Duration::from_millis(50));
-                    let still_waiting = handle
-                        .try_state::<ResidentState>()
-                        .map(|s| s.with_inner(|inner| inner.pending_show))
-                        .unwrap_or(false);
-                    if !still_waiting {
-                        return;
-                    }
-                }
-                // 超时兜底：前端迟迟未上报（如异常），强制显示避免窗口"消失"
-                handle
-                    .try_state::<ResidentState>()
-                    .map(|s| s.with_inner(|inner| inner.pending_show = false));
-                focus_main_window(&handle);
-                if let Some(win) = handle.get_webview_window("main") {
-                    let _ = win.show();
-                }
-                log::warn!("[resident] app_ready timeout, force show window");
-            });
-        }
-    }
-    focus_main_window(app);
-}
-
-/// 前端 init 完成、首帧绘制后调用：若窗口正等待显示，则显示并聚焦。
-#[tauri::command]
-fn app_ready(app: tauri::AppHandle) {
-    if let Some(state) = app.try_state::<ResidentState>() {
-        let should_show = state.with_inner(|inner| {
-            if inner.pending_show {
-                inner.pending_show = false;
-                true
-            } else {
-                false
-            }
-        });
-        if should_show {
-            if let Some(win) = app.get_webview_window("main") {
-                let _ = win.unminimize();
-                let _ = win.show();
-                let _ = win.set_focus();
-            }
-            log::info!("[resident] app_ready, window shown");
-        }
-    }
-}
-
-#[tauri::command]
-fn get_args(app: tauri::AppHandle) -> Vec<String> {
-    if let Some(state) = app.try_state::<ResidentState>() {
-        let already = state.with_inner(|inner| {
-            if inner.args_consumed {
-                true
-            } else {
-                inner.args_consumed = true;
-                false
-            }
-        });
-        if already {
-            log::info!("[launch] get_args: already_consumed=true, returning []");
-            return Vec::new();
-        }
-    }
-    let args: Vec<String> = env::args().skip(1).collect();
-    // 前端当前只使用 args[0]（为空时不打开）；记录其余参数，避免未知开关或多文件参数无迹可查。
-    log::info!(
-        "[launch] get_args: argv={:?}, frontend_target={:?}, unused_trailing={:?}",
-        args,
-        args.first().filter(|arg| !arg.is_empty()),
-        args.get(1..).unwrap_or_default()
-    );
-    args
-}
-
-/// 前端 init 时上报自己页面的真实 URL（dev 为 devUrl、release 为应用协议地址）。
-/// 卸载后再唤醒时 WebView 已在 about:blank，JS 上下文已销毁，只能靠这个记录导航回去。
-#[tauri::command]
-fn set_app_url(app: tauri::AppHandle, url: String) {
-    if url.starts_with("http://")
-        || url.starts_with("https://")
-        || url.starts_with("tauri://")
-        || url.starts_with("http://tauri.localhost")
-    {
-        if let Some(state) = app.try_state::<ResidentState>() {
-            state.with_inner(|inner| inner.app_url = url);
-        }
-    }
-}
-
-/// 前端启动后询问：本次唤醒是否有待打开的路径（single-instance 转发）。
-/// 取走即清空（consume-once）；None 表示走会话恢复。
-#[tauri::command]
-fn get_pending_open(app: tauri::AppHandle) -> Option<String> {
-    let path = app.try_state::<ResidentState>()
-        .and_then(|state| state.with_inner(|inner| inner.pending_open.take()));
-    log::info!("[launch] get_pending_open: consumed={:?}", path);
-    path
-}
 
 #[tauri::command]
 fn app_data_dir() -> Result<String, String> {
@@ -745,6 +529,8 @@ pub fn run() {
     #[cfg(windows)]
     let process_load_ms = process_start_elapsed_ms();
     tauri::Builder::default()
+        .manage(resident::ResidentState::new())
+        .on_page_load(|webview, payload| resident::on_page_load(&webview, &payload))
         // 单实例常驻：二次启动（含双击 md / 命令行带参）把 argv 转发给常驻进程后立即退出。
         // 必须最先注册，尽早拦截二次启动。
         .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
@@ -756,53 +542,8 @@ pub fn run() {
                 cwd,
                 argv
             );
-            // 二次启动发生时，若关闭卸载流程还在等待窗口内，取消它
-            if let Some(state) = app.try_state::<ResidentState>() {
-                state.with_inner(|inner| inner.cancel_unload = true);
-            }
-            // cwd 由回调单独提供，argv[0] 为 exe 路径；保持原有单目标选择逻辑。
-            // 跳过与当前进程 exe 相同的项，取第一个真实目标（兼容插件未来调整约定）。
-            let exe_path = std::env::current_exe()
-                .ok()
-                .map(|p| p.to_string_lossy().to_lowercase());
-            let target = argv
-                .iter()
-                .skip(1)
-                .find(|a| {
-                    let lower = a.to_lowercase();
-                    Some(lower.as_str()) != exe_path.as_deref()
-                })
-                .cloned();
-            let was_unloaded = app
-                .try_state::<ResidentState>()
-                .map(|s| s.with_inner(|inner| inner.unloaded))
-                .unwrap_or(false);
-            log::info!(
-                "[launch] relaunch selection: current_exe={:?}, target={:?}, was_unloaded={}, delivery={}",
-                exe_path,
-                target,
-                was_unloaded,
-                if was_unloaded { "pending_open" } else { "event" }
-            );
-            // 内容已卸载：记下待打开路径，页面导航回来后由 init 调 get_pending_open 消费
-            if was_unloaded {
-                if let (Some(state), Some(path)) = (app.try_state::<ResidentState>(), target.as_ref()) {
-                    state.with_inner(|inner| inner.pending_open = Some(path.clone()));
-                }
-                // 窗口此刻是隐藏的，显示动作交给 resume_main_window 的 app_ready 流程
-            } else {
-                // 内容未卸载、窗口可见：直接置顶显示（focus_main_window 走 unminimize+set_focus）
-                if let Some(win) = app.get_webview_window("main") {
-                    let _ = win.show();
-                }
-            }
-            resume_main_window(app);
-            // 内容未卸载：前端已在运行，直接推事件打开文件（不置 pending，避免残留污染下次唤醒）
-            if !was_unloaded {
-                if let Some(path) = target {
-                    emit_open_path(app, &path);
-                }
-            }
+            resident::enqueue_launch(app, "relaunch", &argv, std::path::Path::new(&cwd));
+            resident::resume_main_window(app);
         }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
@@ -824,7 +565,7 @@ pub fn run() {
         // 与 setup entered 之差即「主窗口 + WebView2 创建」耗时
         .plugin(
             tauri::plugin::Builder::new("startup-probe")
-                .setup(move |_app, _api: tauri::plugin::PluginApi<tauri::Wry, ()>| {
+                .setup(move |app, _api: tauri::plugin::PluginApi<tauri::Wry, ()>| {
                     log::info!("[perf] rust: plugins ready at +{:?}", boot_start.elapsed());
                     // log 已就绪；在前端消费参数之前记录含 exe 的原始启动参数。
                     // args_os 避免仅为记录日志而对非 Unicode 参数触发 panic。
@@ -835,15 +576,21 @@ pub fn run() {
                         env::current_dir(),
                         env::args_os().collect::<Vec<_>>()
                     );
+                    let argv = env::args_os().map(|arg| arg.to_string_lossy().into_owned()).collect::<Vec<String>>();
+                    match env::current_dir() {
+                        Ok(cwd) => resident::enqueue_launch(app, "cold-start", &argv, &cwd),
+                        Err(error) => resident::enqueue(app, "cold-start", Vec::new(), Some(format!("无法读取启动工作目录: {error}"))),
+                    }
                     Ok(())
                 })
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![
-            get_args,
-            get_pending_open,
-            set_app_url,
-            app_ready,
+            resident::frontend_begin,
+            resident::frontend_ready,
+            resident::next_open_request,
+            resident::complete_open_request,
+            resident::app_ready,
             app_data_dir,
             add_allowed_path,
             set_tray_theme,
@@ -869,22 +616,10 @@ pub fn run() {
             }
             log::info!("[perf] rust: setup entered at +{:?}", boot_start.elapsed());
 
-            app.manage(ResidentState::new());
             app.manage(updater::UpdateState::new(app.handle()));
             updater::start(app.handle());
 
-            // 记录应用页面前端 URL（dev 为 devUrl，release 为 tauri://localhost），唤醒导航用；
-            // 前端 init 时还会通过 set_app_url 上报更可靠的地址
-            if let Some(win) = app.get_webview_window("main") {
-                if let Ok(url) = win.url() {
-                    let text = url.to_string();
-                    app.state::<ResidentState>().with_inner(|inner| {
-                        if !text.starts_with("about:") {
-                            inner.app_url = text;
-                        }
-                    });
-                }
-            }
+            resident::install_close_handler(app);
 
             #[cfg(desktop)]
             {
@@ -899,7 +634,7 @@ pub fn run() {
                     .menu(&menu)
                     .show_menu_on_left_click(false)
                     .on_menu_event(|app, event| match event.id.as_ref() {
-                        "show" => resume_main_window(app),
+                        "show" => resident::resume_main_window(app),
                         "quit" => app.exit(0),
                         _ => {}
                     })
@@ -910,63 +645,32 @@ pub fn run() {
                             ..
                         } = event
                         {
-                            resume_main_window(tray.app_handle());
+                            resident::resume_main_window(tray.app_handle());
                         }
                     })
                     .build(app)?;
             }
 
-            // 常驻核心：拦截点 X 关闭。closeToTray 开启时立即隐藏窗口（体感即关），
-            // 隐藏后通知前端落盘会话，500ms 后卸载 WebView 内容（导航到 about:blank）。
-            if let Some(win) = app.get_webview_window("main") {
-                let win_for_flush = win.clone();
-                let win_for_hide = win.clone();
-                win.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        if !close_to_tray_enabled() {
-                            return;
-                        }
-                        api.prevent_close();
-                        // 立即隐藏：用户点 X 的那一刻窗口就消失，体感与"关闭"一致
-                        let _ = win_for_hide.hide();
-                        // 窗口已隐藏，此刻通知前端立即落盘会话
-                        let _ = win_for_flush.eval(
-                            "window.dispatchEvent(new CustomEvent('madu:hide-before-close'))",
-                        );
-                        let hide_win = win_for_hide.clone();
-                        std::thread::spawn(move || {
-                            // 给前端写入 session.json 留出落盘窗口（窗口已隐藏，无感知）
-                            std::thread::sleep(std::time::Duration::from_millis(SESSION_SETTLE_MS));
-                            // 等待窗口内发生二次启动：放弃卸载，保持窗口可见
-                            let cancelled = hide_win
-                                .app_handle()
-                                .try_state::<ResidentState>()
-                                .map(|s| {
-                                    s.with_inner(|inner| std::mem::replace(&mut inner.cancel_unload, false))
-                                })
-                                .unwrap_or(false);
-                            if cancelled {
-                                log::info!("[resident] close cancelled by relaunch, window stays visible");
-                                return;
-                            }
-                            // 内容卸载：导航到空白页，释放 DOM/JS 堆；唤醒时导航回来重新初始化
-                            if let Ok(blank) = tauri::Url::parse(BLANK_URL) {
-                                let _ = hide_win.navigate(blank);
-                            }
-                            if let Some(state) =
-                                hide_win.app_handle().try_state::<ResidentState>()
-                            {
-                                state.with_inner(|inner| inner.unloaded = true);
-                            }
-                            log::info!("[resident] window hidden, webview content unloaded");
-                        });
-                    }
-                });
-            }
-
             log::info!("[perf] rust: setup done at +{:?}", boot_start.elapsed());
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, _event| {
+            // Finder / LaunchServices 不一定经过 argv，统一进入同一队列。
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = _event {
+                log::info!("[launch] source=system-open urls={urls:?}");
+                let mut paths = Vec::new();
+                let mut error = None;
+                for url in urls {
+                    match url.to_file_path() {
+                        Ok(path) => paths.push(path.to_string_lossy().into_owned()),
+                        Err(()) => error = Some(format!("不支持的打开地址: {url}")),
+                    }
+                }
+                resident::enqueue(_app, "system-open", paths, error);
+                resident::resume_main_window(_app);
+            }
+        });
 }

@@ -1,3 +1,4 @@
+import { openUserPaths } from '../lib/openPaths'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import {
@@ -91,7 +92,7 @@ export default function CommandPalette({
         label: f.name,
         hint: f.path,
         icon: fileIcon(f.name),
-        action: () => void tabStore.openFile(f.path),
+        action: () => void openUserPaths([f.path], { updateWorkspace: false }),
       }))
 
     const headings = extractHeadings(tabStore.activeContent || '')

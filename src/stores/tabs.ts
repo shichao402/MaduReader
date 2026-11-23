@@ -287,9 +287,6 @@ class TabStore {
       if (directoryChanged) await this.refreshFileTree()
     } catch (e) {
       console.error('[Tabs] Failed to open file:', e)
-      if (normalizedPath.includes('not-found')) {
-        return
-      }
       throw e
     }
   }
