@@ -191,10 +191,19 @@ fn get_args(app: tauri::AppHandle) -> Vec<String> {
             }
         });
         if already {
+            log::info!("[launch] get_args: already_consumed=true, returning []");
             return Vec::new();
         }
     }
-    env::args().skip(1).collect()
+    let args: Vec<String> = env::args().skip(1).collect();
+    // 前端当前只使用 args[0]（为空时不打开）；记录其余参数，避免未知开关或多文件参数无迹可查。
+    log::info!(
+        "[launch] get_args: argv={:?}, frontend_target={:?}, unused_trailing={:?}",
+        args,
+        args.first().filter(|arg| !arg.is_empty()),
+        args.get(1..).unwrap_or_default()
+    );
+    args
 }
 
 /// 前端 init 时上报自己页面的真实 URL（dev 为 devUrl、release 为应用协议地址）。
@@ -216,8 +225,10 @@ fn set_app_url(app: tauri::AppHandle, url: String) {
 /// 取走即清空（consume-once）；None 表示走会话恢复。
 #[tauri::command]
 fn get_pending_open(app: tauri::AppHandle) -> Option<String> {
-    app.try_state::<ResidentState>()
-        .and_then(|state| state.with_inner(|inner| inner.pending_open.take()))
+    let path = app.try_state::<ResidentState>()
+        .and_then(|state| state.with_inner(|inner| inner.pending_open.take()));
+    log::info!("[launch] get_pending_open: consumed={:?}", path);
+    path
 }
 
 #[tauri::command]
@@ -736,12 +747,20 @@ pub fn run() {
     tauri::Builder::default()
         // 单实例常驻：二次启动（含双击 md / 命令行带参）把 argv 转发给常驻进程后立即退出。
         // 必须最先注册，尽早拦截二次启动。
-        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+            // 二次启动进程在 log 插件初始化前退出；在常驻进程中、任何筛选前记录原始转发数据。
+            // Debug 格式保留参数边界，并转义引号、换行等字符，便于还原未知参数。
+            log::info!(
+                "[launch] source=relaunch, resident_pid={}, cwd={:?}, argv={:?}",
+                std::process::id(),
+                cwd,
+                argv
+            );
             // 二次启动发生时，若关闭卸载流程还在等待窗口内，取消它
             if let Some(state) = app.try_state::<ResidentState>() {
                 state.with_inner(|inner| inner.cancel_unload = true);
             }
-            // 插件把 cwd 与 exe 路径一并放进 argv：argv[0]=cwd、argv[1]=exe 路径、argv[2]=真实参数。
+            // cwd 由回调单独提供，argv[0] 为 exe 路径；保持原有单目标选择逻辑。
             // 跳过与当前进程 exe 相同的项，取第一个真实目标（兼容插件未来调整约定）。
             let exe_path = std::env::current_exe()
                 .ok()
@@ -758,6 +777,13 @@ pub fn run() {
                 .try_state::<ResidentState>()
                 .map(|s| s.with_inner(|inner| inner.unloaded))
                 .unwrap_or(false);
+            log::info!(
+                "[launch] relaunch selection: current_exe={:?}, target={:?}, was_unloaded={}, delivery={}",
+                exe_path,
+                target,
+                was_unloaded,
+                if was_unloaded { "pending_open" } else { "event" }
+            );
             // 内容已卸载：记下待打开路径，页面导航回来后由 init 调 get_pending_open 消费
             if was_unloaded {
                 if let (Some(state), Some(path)) = (app.try_state::<ResidentState>(), target.as_ref()) {
@@ -800,6 +826,15 @@ pub fn run() {
             tauri::plugin::Builder::new("startup-probe")
                 .setup(move |_app, _api: tauri::plugin::PluginApi<tauri::Wry, ()>| {
                     log::info!("[perf] rust: plugins ready at +{:?}", boot_start.elapsed());
+                    // log 已就绪；在前端消费参数之前记录含 exe 的原始启动参数。
+                    // args_os 避免仅为记录日志而对非 Unicode 参数触发 panic。
+                    log::info!(
+                        "[launch] source=cold-start, pid={}, version={}, cwd={:?}, argv={:?}",
+                        std::process::id(),
+                        env!("CARGO_PKG_VERSION"),
+                        env::current_dir(),
+                        env::args_os().collect::<Vec<_>>()
+                    );
                     Ok(())
                 })
                 .build(),
