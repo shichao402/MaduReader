@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { X, ZoomIn, ZoomOut } from 'lucide-react'
 import {
+  canUpscaleMedia,
   fitTransform,
   panBy,
   prepareSvgMarkup,
+  relativeScalePercent,
   wheelZoomDelta,
   zoomAtPoint,
   zoomBy,
@@ -14,54 +16,92 @@ import {
 
 const IDENTITY: ViewTransform = { scale: 1, x: 0, y: 0 }
 
-export default function MediaLightbox({
-  payload,
-  onClose,
-}: {
+interface MediaLightboxProps {
   payload: MediaPayload
   onClose: () => void
-}) {
+}
+
+export default function MediaLightbox(props: MediaLightboxProps) {
+  const { payload } = props
+  // 换图时隔离加载状态，不能拿上一张图的尺寸先适配新图。
+  return <MediaLightboxView key={`${payload.kind}:${payload.svg ?? payload.src ?? ''}`} {...props} />
+}
+
+function MediaLightboxView({ payload, onClose }: MediaLightboxProps) {
+  const prepared = useMemo(
+    () => (payload.kind === 'svg' && payload.svg ? prepareSvgMarkup(payload.svg) : null),
+    [payload.kind, payload.svg],
+  )
+  const allowUpscale = canUpscaleMedia(payload)
   const rootRef = useRef<HTMLDivElement>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
   const transformRef = useRef<ViewTransform>(IDENTITY)
+  const fitScaleRef = useRef<number | null>(null)
+  const autoFitRef = useRef(true)
   const dragRef = useRef<{ id: number; x: number; y: number; origin: ViewTransform } | null>(null)
   const [transform, setTransform] = useState<ViewTransform>(IDENTITY)
-  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null)
+  const [fitScale, setFitScale] = useState<number | null>(null)
+  const [natural, setNatural] = useState<{ w: number; h: number } | null>(
+    () => (prepared ? { w: prepared.width, h: prepared.height } : null),
+  )
   const [failed, setFailed] = useState(false)
   const [panning, setPanning] = useState(false)
-
-  const prepared = useMemo(
-    () => (payload.kind === 'svg' && payload.svg ? prepareSvgMarkup(payload.svg) : null),
-    [payload],
-  )
 
   function commit(next: ViewTransform) {
     transformRef.current = next
     setTransform(next)
   }
 
+  function commitUserTransform(next: ViewTransform) {
+    autoFitRef.current = false
+    commit(next)
+  }
+
   function fitTo(size: { w: number; h: number }) {
     const viewport = viewportRef.current
-    if (!viewport) return
-    commit(fitTransform(viewport.clientWidth, viewport.clientHeight, size.w, size.h))
+    if (!viewport || viewport.clientWidth <= 0 || viewport.clientHeight <= 0) return
+    const next = fitTransform(
+      viewport.clientWidth,
+      viewport.clientHeight,
+      size.w,
+      size.h,
+      48,
+      allowUpscale,
+    )
+    fitScaleRef.current = next.scale
+    setFitScale(next.scale)
+    commit(next)
+  }
+
+  function resetFit() {
+    if (!natural) return
+    autoFitRef.current = true
+    dragRef.current = null
+    setPanning(false)
+    fitTo(natural)
   }
 
   useEffect(() => {
     closeRef.current?.focus()
   }, [])
 
-  useEffect(() => {
-    if (prepared) setNatural({ w: prepared.width, h: prepared.height })
-  }, [prepared])
-
-  useEffect(() => {
+  useLayoutEffect(() => {
     const viewport = viewportRef.current
     if (!natural || !viewport) return
-    const next = fitTransform(viewport.clientWidth, viewport.clientHeight, natural.w, natural.h)
-    transformRef.current = next
-    setTransform(next)
-  }, [natural])
+    const refit = () => {
+      if (autoFitRef.current) fitTo(natural)
+    }
+    // 在首次可见之前完成适配；观察实际可用区域（不包含工具栏）。
+    refit()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(refit)
+    observer?.observe(viewport)
+    window.addEventListener('resize', refit)
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', refit)
+    }
+  }, [natural, allowUpscale])
 
   useEffect(() => {
     const root = rootRef.current
@@ -69,15 +109,17 @@ export default function MediaLightbox({
     if (!root || !viewport) return
     const onWheel = (event: WheelEvent) => {
       event.preventDefault()
-      if (!viewport.contains(event.target as Node)) return
+      const baseScale = fitScaleRef.current
+      if (baseScale === null || event.deltaY === 0 || !viewport.contains(event.target as Node)) return
       const rect = viewport.getBoundingClientRect()
       const next = zoomAtPoint(
         transformRef.current,
         event.clientX - rect.left,
         event.clientY - rect.top,
         wheelZoomDelta(event.deltaY, event.deltaMode),
+        baseScale,
       )
-      commit(next)
+      commitUserTransform(next)
     }
     root.addEventListener('wheel', onWheel, { passive: false })
     return () => root.removeEventListener('wheel', onWheel)
@@ -96,19 +138,21 @@ export default function MediaLightbox({
 
   function zoomTowardCenter(factor: number) {
     const viewport = viewportRef.current
-    if (!viewport) return
-    commit(
+    const baseScale = fitScaleRef.current
+    if (!viewport || baseScale === null) return
+    commitUserTransform(
       zoomBy(
         transformRef.current,
         factor,
         viewport.clientWidth / 2,
         viewport.clientHeight / 2,
+        baseScale,
       ),
     )
   }
 
   function onPointerDown(event: React.PointerEvent<HTMLDivElement>) {
-    if (event.button !== 0) return
+    if (event.button !== 0 || fitScaleRef.current === null) return
     if ((event.target as Element).closest('button')) return
     event.currentTarget.setPointerCapture(event.pointerId)
     dragRef.current = {
@@ -123,13 +167,10 @@ export default function MediaLightbox({
   function onPointerMove(event: React.PointerEvent<HTMLDivElement>) {
     const drag = dragRef.current
     if (!drag || drag.id !== event.pointerId) return
-    commit(
-      panBy(
-        drag.origin,
-        event.clientX - drag.x,
-        event.clientY - drag.y,
-      ),
-    )
+    const dx = event.clientX - drag.x
+    const dy = event.clientY - drag.y
+    if (dx === 0 && dy === 0) return
+    commitUserTransform(panBy(drag.origin, dx, dy))
   }
 
   function endPan(event: React.PointerEvent<HTMLDivElement>) {
@@ -138,7 +179,8 @@ export default function MediaLightbox({
     setPanning(false)
   }
 
-  const percent = Math.round(transform.scale * 100)
+  const percent = fitScale === null ? null : relativeScalePercent(transform.scale, fitScale)
+  const ready = fitScale !== null && !failed
 
   return createPortal(
     <div
@@ -152,18 +194,19 @@ export default function MediaLightbox({
         <span className="media-lightbox-title">{payload.label}</span>
         <span className="media-lightbox-hint">滚轮缩放 · 按住拖动</span>
         <div className="media-lightbox-actions">
-          <button type="button" onClick={() => zoomTowardCenter(1 / 1.2)} title="缩小">
+          <button type="button" disabled={!ready} onClick={() => zoomTowardCenter(1 / 1.2)} title="缩小">
             <ZoomOut size={15} />
             缩小
           </button>
           <button
             type="button"
-            onClick={() => natural && fitTo(natural)}
-            title="适应窗口"
+            disabled={!ready}
+            onClick={resetFit}
+            title="缩放比例相对适应窗口，点击重新适配并居中（100%）"
           >
-            {percent}%
+            {percent === null ? (failed ? '未加载' : '加载中') : `${percent}%`}
           </button>
-          <button type="button" onClick={() => zoomTowardCenter(1.2)} title="放大">
+          <button type="button" disabled={!ready} onClick={() => zoomTowardCenter(1.2)} title="放大">
             <ZoomIn size={15} />
             放大
           </button>
@@ -180,6 +223,7 @@ export default function MediaLightbox({
         onPointerMove={onPointerMove}
         onPointerUp={endPan}
         onPointerCancel={endPan}
+        onLostPointerCapture={endPan}
       >
         {failed ? (
           <p className="media-lightbox-status">图片加载失败</p>
@@ -188,7 +232,7 @@ export default function MediaLightbox({
             className="media-lightbox-stage"
             style={{
               transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
-              visibility: natural ? 'visible' : 'hidden',
+              visibility: ready ? 'visible' : 'hidden',
             }}
           >
             {payload.kind === 'svg' && prepared ? (
@@ -201,6 +245,7 @@ export default function MediaLightbox({
                 className="media-lightbox-plate"
                 src={payload.src}
                 alt={payload.alt || payload.label}
+                style={natural ? { width: natural.w, height: natural.h } : undefined}
                 draggable={false}
                 onLoad={(event) => {
                   const img = event.currentTarget

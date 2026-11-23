@@ -2,6 +2,7 @@
 // React 侧通过 useSyncExternalStore 订阅，不再依赖任何响应式框架。
 
 import type { SessionData } from '../lib/session'
+import { perfLog } from '../lib/perfLog'
 
 export interface Tab {
   id: string
@@ -10,6 +11,7 @@ export interface Tab {
   content: string
   isModified: boolean
   isUntitled: boolean
+  sourceMissing?: boolean
 }
 
 export interface FileNode {
@@ -28,8 +30,34 @@ export interface VirtualFile {
 type SidebarView = 'tree' | 'outline'
 type Listener = () => void
 
+interface DirectoryScan {
+  previousTree: FileNode[]
+  directories: Map<string, Set<string>>
+  failures: Map<string, string>
+  readDir?: typeof import('../lib/fsAccess').allowAndReadDir
+}
+
 function normalizePath(path: string): string {
-  return path.replace(/\\/g, '/').replace(/\/+/g, '/')
+  const slashed = path.replace(/\\/g, '/')
+  const collapsed = slashed.replace(/\/+/g, '/')
+  const normalized = slashed.startsWith('//') ? `/${collapsed}` : collapsed
+  // 不折叠 UNC 前缀，也不丢失盘符根目录/POSIX 根；保留大小写。
+  if (normalized === '/' || normalized === '//' || /^[a-z]:\/$/i.test(normalized)) {
+    return normalized
+  }
+  return normalized.replace(/\/+$/, '')
+}
+
+function directoryPrefix(path: string): string {
+  return path.endsWith('/') ? path : `${path}/`
+}
+
+function joinPath(dir: string, name: string): string {
+  return normalizePath(`${dir ? directoryPrefix(dir) : ''}${name}`)
+}
+
+function isWithinPath(path: string, dir: string): boolean {
+  return path === dir || path.startsWith(directoryPrefix(dir))
 }
 
 function getBaseName(path: string): string {
@@ -39,12 +67,14 @@ function getBaseName(path: string): string {
 function getDirName(path: string): string {
   const normalized = normalizePath(path)
   const index = normalized.lastIndexOf('/')
+  if (index === 0) return '/'
+  if (index === 2 && /^[a-z]:\//i.test(normalized)) return normalized.slice(0, 3)
   return index > 0 ? normalized.substring(0, index) : ''
 }
 
 function findNodeInTree(nodes: FileNode[], targetPath: string): FileNode | undefined {
   for (const node of nodes) {
-    if (node.path === targetPath) return node
+    if (normalizePath(node.path) === targetPath) return node
     if (node.isDir && node.children) {
       const found = findNodeInTree(node.children, targetPath)
       if (found) return found
@@ -53,12 +83,48 @@ function findNodeInTree(nodes: FileNode[], targetPath: string): FileNode | undef
   return undefined
 }
 
+function cloneFileTree(nodes: FileNode[]): FileNode[] {
+  return nodes.map((node) => ({ ...node, children: cloneFileTree(node.children) }))
+}
+
+function sameFileTree(a: FileNode[], b: FileNode[]): boolean {
+  return a.length === b.length && a.every((node, index) => {
+    const other = b[index]
+    return node.name === other.name && node.path === other.path &&
+      node.isDir === other.isDir && node.expanded === other.expanded &&
+      sameFileTree(node.children, other.children)
+  })
+}
+
+function preserveExpansion(nodes: FileNode[], previous: FileNode[]): void {
+  const expanded = new Map<string, boolean>()
+  const collect = (level: FileNode[]) => level.forEach((node) => {
+    if (node.isDir) expanded.set(normalizePath(node.path), node.expanded)
+    collect(node.children)
+  })
+  const apply = (level: FileNode[]) => level.forEach((node) => {
+    const value = expanded.get(node.path)
+    if (node.isDir && value !== undefined) node.expanded = value
+    apply(node.children)
+  })
+  collect(previous)
+  apply(nodes)
+}
+
 class TabStore {
   private _tabs: Tab[] = []
   private _activeTabId: string | null = null
   private _workingDirectory = ''
   private _fileTree: FileNode[] = []
   private _sidebarView: SidebarView = 'tree'
+  private _isVirtualWorkspace = false
+  private _directoryError: string | null = null
+  private _directoryGeneration = 0
+
+  // 跨 reset/切目录仍持有实际扫描锁。请求序号只递增，所有等待者共享补扫闭环。
+  private _refreshTask: Promise<void> | null = null
+  private _refreshRequested = 0
+  private _refreshCompleted = 0
 
   private _tabCounter = 0
   private _virtualFiles = new Map<string, string>()
@@ -78,20 +144,39 @@ class TabStore {
     this._listeners.forEach((listener) => listener())
   }
 
+  /** 所有目录入口共用的代次边界；同路径恢复/重建也可以强制隔离。 */
+  private changeWorkspace(dir: string, virtual = false, force = false): boolean {
+    const normalized = normalizePath(dir)
+    const changed = normalized !== this._workingDirectory || virtual !== this._isVirtualWorkspace
+    if (!force && !changed) return false
+    this._directoryGeneration += 1
+    this._workingDirectory = normalized
+    this._isVirtualWorkspace = virtual
+    if (changed) {
+      this._directoryError = null
+      this._fileTree = []
+    }
+    if (!virtual) this._virtualFiles.clear()
+    return changed
+  }
+
   get version(): number {
     return this._version
   }
 
-  /** 测试隔离用：恢复到初始空状态 */
+  /** 测试隔离用：恢复到初始空状态，但不释放尚未完成的实际扫描锁。 */
   reset(): void {
+    const changed = this._tabs.length > 0 || this._activeTabId !== null ||
+      this._workingDirectory !== '' || this._fileTree.length > 0 ||
+      this._sidebarView !== 'tree' || this._isVirtualWorkspace || this._directoryError !== null
+    this.changeWorkspace('', false, true)
     this._tabs = []
     this._activeTabId = null
-    this._workingDirectory = ''
     this._fileTree = []
+    this._directoryError = null
     this._sidebarView = 'tree'
     this._tabCounter = 0
-    this._virtualFiles.clear()
-    this.emit()
+    if (changed) this.emit()
   }
 
   // ---- 状态访问 ----
@@ -101,6 +186,7 @@ class TabStore {
   }
 
   set tabs(value: Tab[]) {
+    if (this._tabs === value) return
     this._tabs = value
     this.emit()
   }
@@ -110,6 +196,7 @@ class TabStore {
   }
 
   set activeTabId(value: string | null) {
+    if (this._activeTabId === value) return
     this._activeTabId = value
     this.emit()
   }
@@ -119,8 +206,15 @@ class TabStore {
   }
 
   set workingDirectory(value: string) {
-    this._workingDirectory = value
-    this.emit()
+    this.setWorkingDirectory(value)
+  }
+
+  get isVirtualWorkspace(): boolean {
+    return this._isVirtualWorkspace
+  }
+
+  get directoryError(): string | null {
+    return this._directoryError
   }
 
   get fileTree(): FileNode[] {
@@ -128,6 +222,7 @@ class TabStore {
   }
 
   set fileTree(value: FileNode[]) {
+    if (sameFileTree(this._fileTree, value)) return
     this._fileTree = value
     this.emit()
   }
@@ -137,8 +232,7 @@ class TabStore {
   }
 
   set sidebarView(value: SidebarView) {
-    this._sidebarView = value
-    this.emit()
+    this.setSidebarView(value)
   }
 
   get activeTab(): Tab | null {
@@ -165,11 +259,13 @@ class TabStore {
       }
       const name = getBaseName(normalizedPath)
 
-      // 检查是否已打开
+      // 已打开的正文仍是原快照；成功读到源文件仅清除丢失标记。
       const existingTab = this._tabs.find((t) => t.path === normalizedPath && !t.isUntitled)
       if (existingTab) {
+        const changed = this._activeTabId !== existingTab.id || existingTab.sourceMissing === true
         this._activeTabId = existingTab.id
-        this.emit()
+        if (existingTab.sourceMissing) existingTab.sourceMissing = false
+        if (changed) this.emit()
         return
       }
 
@@ -185,13 +281,10 @@ class TabStore {
       this._tabs.push(newTab)
       this._activeTabId = newTab.id
 
-      // 设置工作目录
-      if (!this._workingDirectory) {
-        this._workingDirectory = getDirName(normalizedPath)
-        // 首次确定工作目录后立即构建文件树，否则目录面板会一直是空的
-        await this.refreshFileTree()
-      }
+      const directoryChanged = !this._workingDirectory &&
+        this.changeWorkspace(getDirName(normalizedPath), this._isVirtualWorkspace)
       this.emit()
+      if (directoryChanged) await this.refreshFileTree()
     } catch (e) {
       console.error('[Tabs] Failed to open file:', e)
       if (normalizedPath.includes('not-found')) {
@@ -267,69 +360,167 @@ class TabStore {
     })
   }
 
-  async refreshFileTree(): Promise<void> {
-    if (!this._workingDirectory) {
-      return
-    }
+  refreshFileTree(): Promise<void> {
+    if (!this._workingDirectory) return Promise.resolve()
+    this._refreshRequested += 1
+    return this.ensureRefreshTask()
+  }
 
-    const t0 = performance.now()
-    try {
-      this._fileTree =
-        this._virtualFiles.size > 0
-          ? this.buildVirtualFileTree(this._workingDirectory)
-          : pruneNonMarkdownNodes(await this.buildFileTree(this._workingDirectory))
-      void import('../lib/perfLog').then(({ perfLog }) =>
-        perfLog(`frontend: file tree built in ${(performance.now() - t0).toFixed(0)}ms`),
-      )
-      this.emit()
-    } catch (e) {
-      console.error('[Tabs] Failed to refresh file tree:', e)
+  private ensureRefreshTask(): Promise<void> {
+    if (this._refreshTask) return this._refreshTask
+    this._refreshTask = Promise.resolve()
+      .then(() => this.drainFileTreeRefreshes())
+      .finally(() => {
+        this._refreshTask = null
+        // 覆盖 drain 结束到 promise 清理之间的微任务窗口，等待者也等待这次补扫。
+        if (this._refreshCompleted < this._refreshRequested) return this.ensureRefreshTask()
+      })
+    return this._refreshTask
+  }
+
+  private async drainFileTreeRefreshes(): Promise<void> {
+    while (this._refreshCompleted < this._refreshRequested) {
+      const request = this._refreshRequested
+      const generation = this._directoryGeneration
+      const root = this._workingDirectory
+      const virtual = this._isVirtualWorkspace
+      if (!root) {
+        this._refreshCompleted = request
+        continue
+      }
+      const scan: DirectoryScan = {
+        previousTree: this._fileTree,
+        directories: new Map(),
+        failures: new Map(),
+      }
+      const t0 = performance.now()
+      let outcome = 'stale'
+      try {
+        const tree = pruneNonMarkdownNodes(virtual
+          ? this.buildVirtualFileTree(root)
+          : await this.buildFileTree(root, 0, scan))
+        if (generation !== this._directoryGeneration) continue
+        const sources = virtual ? new Map<Tab, boolean>() : await this.checkTabSources(root, scan)
+        if (generation !== this._directoryGeneration) continue
+
+        // 必须在所有 await 之后读取当前树，包含扫描期间刚刚发生的展开/折叠。
+        preserveExpansion(tree, this._fileTree)
+        const error = scan.failures.size > 0
+          ? [...scan.failures.values()].sort().join('\n')
+          : null
+        const treeChanged = !sameFileTree(this._fileTree, tree)
+        let changed = treeChanged || this._directoryError !== error
+        if (treeChanged) this._fileTree = tree
+        this._directoryError = error
+        for (const [tab, missing] of sources) {
+          if (!this._tabs.includes(tab) || Boolean(tab.sourceMissing) === missing) continue
+          tab.sourceMissing = missing
+          changed = true
+        }
+        outcome = error ? 'partial' : 'success'
+        if (changed) this.emit()
+      } catch (e) {
+        if (generation !== this._directoryGeneration) continue
+        // 根目录失败不等于空目录，保留树、标签、正文以及已有的丢失标记。
+        const error = e instanceof Error ? e.message : String(e)
+        outcome = 'error'
+        console.error('[Tabs] Failed to refresh file tree:', root, e)
+        if (this._directoryError !== error) {
+          this._directoryError = error
+          this.emit()
+        }
+      } finally {
+        this._refreshCompleted = request
+        void perfLog(
+          `frontend: file tree scan generation=${generation} request=${request} ` +
+          `root=${root} ${outcome} in ${(performance.now() - t0).toFixed(0)}ms`,
+        )
+      }
     }
   }
 
-  async buildFileTree(dir = this._workingDirectory, depth = 0): Promise<FileNode[]> {
-    const { allowAndReadDir } = await import('../lib/fsAccess')
-    const emptyNodes: FileNode[] = []
+  /** 使用成功列举的目录证明存在/丢失；剪枝边界以外才单独 exists 探测。 */
+  private async checkTabSources(root: string, scan: DirectoryScan): Promise<Map<Tab, boolean>> {
+    const sources = new Map<Tab, boolean>()
+    let fsModule: Promise<typeof import('@tauri-apps/plugin-fs')> | undefined
+    await Promise.all(this._tabs.filter((tab) => !tab.isUntitled && tab.path).map(async (tab) => {
+      const path = normalizePath(tab.path)
+      // 子目录不可读时，不把陈旧内容当作存在/丢失证据，也不探测后误标删除。
+      if ([...scan.failures.keys()].some((dir) => isWithinPath(path, dir))) return
+      let exists: boolean | undefined
+      if (path.startsWith(directoryPrefix(root))) {
+        const parts = path.slice(directoryPrefix(root).length).split('/')
+        let parent = root
+        for (let index = 0; index < parts.length; index += 1) {
+          const entries = scan.directories.get(parent)
+          if (!entries) break
+          if (!entries.has(parts[index])) {
+            exists = false
+            break
+          }
+          if (index === parts.length - 1) exists = true
+          parent = joinPath(parent, parts[index])
+        }
+      }
+      if (exists === undefined) {
+        try {
+          fsModule ??= import('@tauri-apps/plugin-fs')
+          const fs = await fsModule
+          exists = await fs.exists(path)
+        } catch (e) {
+          console.error('[Tabs] Failed to probe source file:', path, e)
+          return
+        }
+      }
+      if (typeof exists === 'boolean') sources.set(tab, !exists)
+    }))
+    return sources
+  }
 
-    if (!dir || depth > 10) return emptyNodes
-
-    let entries: Array<{ name: string; isDirectory: boolean }> = []
+  async buildFileTree(
+    dir = this._workingDirectory,
+    depth = 0,
+    scan: DirectoryScan = { previousTree: this._fileTree, directories: new Map(), failures: new Map() },
+  ): Promise<FileNode[]> {
+    if (!dir || depth > 10) return []
+    dir = normalizePath(dir)
+    let entries: Array<{ name: string; isDirectory: boolean }>
     try {
-      entries = (await allowAndReadDir(dir)) || []
+      scan.readDir ??= (await import('../lib/fsAccess')).allowAndReadDir
+      entries = await scan.readDir(dir)
+      if (!Array.isArray(entries)) throw new Error('目录读取未返回有效列表')
+      // 记录未剪枝的完整目录，避免空目录、非 Markdown、隐藏项被误当作删除。
+      scan.directories.set(dir, new Set(entries.map((entry) => entry.name)))
     } catch (e) {
-      console.error('[Tabs] Failed to read directory:', e)
-      return emptyNodes
+      const detail = e instanceof Error ? e.message : String(e)
+      const message = `无法读取目录「${dir}」：${detail}`
+      if (depth === 0) throw new Error(message)
+      console.error('[Tabs] Failed to read directory:', dir, e)
+      scan.failures.set(dir, message)
+      const previous = findNodeInTree(scan.previousTree, dir)
+      // 剪枝会改 children，不能把上次的节点直接交给新扫描。
+      return previous?.isDir ? cloneFileTree(previous.children) : []
     }
 
     const visibleEntries = entries.filter(
       (entry) => !entry.name.startsWith('.') && entry.name !== 'node_modules',
     )
-
-    // 并行遍历子目录，深层目录树构建耗时从累加变为取最慢分支
-    const nodes: FileNode[] = await Promise.all(
-      visibleEntries.map(async (entry) => {
-        const fullPath = `${dir}/${entry.name}`
-        const node: FileNode = {
-          name: entry.name,
-          path: fullPath,
-          isDir: entry.isDirectory,
-          children: [],
-          expanded: false,
-        }
-        if (entry.isDirectory) {
-          node.children = await this.buildFileTree(fullPath, depth + 1)
-        }
-        return node
-      }),
-    )
-
-    // 排序：目录在前，然后按名称
+    // 同一次扫描仍并行遍历分支；最大深度和隐藏项剪枝边界保持不变。
+    const nodes: FileNode[] = await Promise.all(visibleEntries.map(async (entry) => {
+      const fullPath = joinPath(dir, entry.name)
+      return {
+        name: entry.name,
+        path: fullPath,
+        isDir: entry.isDirectory,
+        children: entry.isDirectory ? await this.buildFileTree(fullPath, depth + 1, scan) : [],
+        expanded: false,
+      }
+    }))
     nodes.sort((a, b) => {
       if (a.isDir && !b.isDir) return -1
       if (!a.isDir && b.isDir) return 1
       return a.name.localeCompare(b.name)
     })
-
     return nodes
   }
 
@@ -338,15 +529,14 @@ class TabStore {
     const rootNodes: FileNode[] = []
 
     for (const filePath of this._virtualFiles.keys()) {
-      const relativePath = filePath.startsWith(`${normalizedRoot}/`)
-        ? filePath.substring(normalizedRoot.length + 1)
-        : filePath
+      const prefix = directoryPrefix(normalizedRoot)
+      const relativePath = filePath.startsWith(prefix) ? filePath.substring(prefix.length) : filePath
       const parts = relativePath.split('/').filter(Boolean)
       let currentLevel = rootNodes
       let currentPath = normalizedRoot
 
       parts.forEach((part, index) => {
-        currentPath = `${currentPath}/${part}`
+        currentPath = joinPath(currentPath, part)
         const isLast = index === parts.length - 1
         let node = currentLevel.find((item) => item.name === part)
 
@@ -360,7 +550,6 @@ class TabStore {
           }
           currentLevel.push(node)
         }
-
         currentLevel = node.children
       })
     }
@@ -378,38 +567,32 @@ class TabStore {
   }
 
   setSidebarView(view: SidebarView): void {
+    if (this._sidebarView === view) return
     this._sidebarView = view
     this.emit()
   }
 
   setWorkingDirectory(dir: string): void {
-    this._workingDirectory = normalizePath(dir)
-    this.emit()
+    if (this.changeWorkspace(dir)) this.emit()
     void this.refreshFileTree()
   }
 
   async setVirtualWorkspace(root: string, files: VirtualFile[]): Promise<void> {
-    const normalizedRoot = normalizePath(root)
+    this.changeWorkspace(root, true, true)
     this._tabs = []
     this._activeTabId = null
     this._virtualFiles.clear()
-    this._workingDirectory = normalizedRoot
-
     for (const file of files) {
       this._virtualFiles.set(normalizePath(file.path), file.content)
     }
-
-    this._fileTree = this.buildVirtualFileTree(normalizedRoot)
+    this._fileTree = pruneNonMarkdownNodes(this.buildVirtualFileTree(this._workingDirectory))
     this.emit()
-
-    const firstFile = files.find((file) => normalizePath(file.path).endsWith('.md'))
-    if (firstFile) {
-      await this.openFile(firstFile.path)
-    }
+    const firstFile = files.find((file) => isMarkdownFile(file.path))
+    if (firstFile) await this.openFile(firstFile.path)
   }
 
   toggleFileNode(nodePath: string): void {
-    const node = findNodeInTree(this._fileTree, nodePath)
+    const node = findNodeInTree(this._fileTree, normalizePath(nodePath))
     if (node) {
       node.expanded = !node.expanded
       this.emit()
@@ -421,7 +604,7 @@ class TabStore {
   }
 
   openFileFromTree(path: string): void {
-    if (!path.endsWith('.md')) return
+    if (!isMarkdownFile(path)) return
     this.openFile(path).catch(console.error)
   }
 
@@ -434,45 +617,42 @@ class TabStore {
     }
   }
 
-  /** 启动时恢复上次会话：并行授权+读取文件（串行是启动慢的主因之一），按原顺序落位标签，最后切到最后活动的文件 */
+  /** 启动时恢复上次会话：并行读文件，保留已有快照，目录扫描仍放后台。 */
   async restoreSession(session: SessionData): Promise<void> {
-    if (session.workingDirectory) {
-      this._workingDirectory = normalizePath(session.workingDirectory)
-    }
+    const root = normalizePath(session.workingDirectory || this._workingDirectory)
+    // 浏览器示例恢复同一个虚拟根时沿用虚拟文件；真实会话则退出虚拟工作区。
+    const virtual = this._isVirtualWorkspace && root === this._workingDirectory
+    const workspaceChanged = this.changeWorkspace(root, virtual, true)
+    const generation = this._directoryGeneration
+    if (workspaceChanged) this.emit()
     const activeNormalized = session.activePath ? normalizePath(session.activePath) : null
     const paths = activeNormalized
       ? [activeNormalized, ...session.openPaths.filter((p) => normalizePath(p) !== activeNormalized)]
       : session.openPaths
-
     const restoreT0 = performance.now()
-    // 并行做「授权 + 读文件」，单个失败跳过；results 下标顺序 = paths 顺序，保证标签顺序稳定
-    const results = await Promise.all(
-      paths.map(async (path) => {
-        const normalizedPath = normalizePath(path)
-        try {
-          let content: string
-          if (this._virtualFiles.has(normalizedPath)) {
-            content = this._virtualFiles.get(normalizedPath) || ''
-          } else {
-            const { allowAndReadTextFile } = await import('../lib/fsAccess')
-            content = await allowAndReadTextFile(path)
-          }
-          return { normalizedPath, content }
-        } catch (e) {
-          console.error('[Tabs] Failed to restore session file:', path, e)
-          return null
+    const results = await Promise.all(paths.map(async (path) => {
+      const normalizedPath = normalizePath(path)
+      try {
+        let content: string
+        if (this._virtualFiles.has(normalizedPath)) {
+          content = this._virtualFiles.get(normalizedPath) || ''
+        } else {
+          const { allowAndReadTextFile } = await import('../lib/fsAccess')
+          content = await allowAndReadTextFile(path)
         }
-      }),
-    )
+        return { normalizedPath, content }
+      } catch (e) {
+        console.error('[Tabs] Failed to restore session file:', path, e)
+        return null
+      }
+    }))
+    void perfLog(`frontend: session file reads generation=${generation} done in ${(performance.now() - restoreT0).toFixed(0)}ms`)
+    // reset、换目录或另一轮恢复之后，不允许迟到的正文或扫描覆盖新会话。
+    if (generation !== this._directoryGeneration) return
 
-    // 并行读文件耗时单独打点，便于与目录树构建耗时区分
-    void import('../lib/perfLog').then(({ perfLog }) =>
-      perfLog(`frontend: session file reads done in ${(performance.now() - restoreT0).toFixed(0)}ms`),
-    )
-
+    let changed = false
     for (const result of results) {
       if (!result) continue
-      // 恢复期间可能已被手动打开，避免重复建标签
       if (this._tabs.some((t) => t.path === result.normalizedPath && !t.isUntitled)) continue
       this._tabs.push({
         id: `tab-${Date.now()}-${++this._tabCounter}`,
@@ -482,21 +662,21 @@ class TabStore {
         isModified: false,
         isUntitled: false,
       })
+      changed = true
     }
-
-    // 会话缺 workingDirectory 时，用第一个文件所在目录兜底（与原 openFile 行为一致）
+    // 会话缺 workingDirectory 时，用第一个文件所在目录兜底。
     if (!this._workingDirectory && this._tabs.length > 0) {
-      this._workingDirectory = getDirName(this._tabs[0].path)
+      changed = this.changeWorkspace(getDirName(this._tabs[0].path), virtual) || changed
     }
     if (activeNormalized) {
       const target = this._tabs.find((t) => t.path === activeNormalized)
-      if (target) this._activeTabId = target.id
+      if (target && this._activeTabId !== target.id) {
+        this._activeTabId = target.id
+        changed = true
+      }
     }
-    // 目录树构建（含递归授权）耗时较高，放后台执行不阻塞内容展示；完成后 refreshFileTree 内部会自行 emit
-    if (this._workingDirectory && this._fileTree.length === 0) {
-      void this.refreshFileTree()
-    }
-    this.emit()
+    if (changed) this.emit()
+    if (this._workingDirectory) void this.refreshFileTree()
   }
 }
 

@@ -10,6 +10,7 @@ export interface MediaPayload {
   alt?: string
   svg?: string
   label: string
+  allowUpscale?: boolean
 }
 
 export interface PreparedSvg {
@@ -18,14 +19,26 @@ export interface PreparedSvg {
   height: number
 }
 
+// 交互缩放的上下限相对适配基准，不能限制超大图的首次完整适配。
 export const MIN_VIEW_SCALE = 0.2
-// 矢量图（Mermaid / PlantUML SVG）放大不失真，上限只用来防止 scale 溢出到 Infinity 或丢精度，实际等同不设限
 export const MAX_VIEW_SCALE = 1000
 
 const EXPAND_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>`
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
+}
+
+export function canUpscaleMedia(payload: MediaPayload): boolean {
+  if (payload.allowUpscale !== undefined) return payload.allowUpscale
+  if (payload.kind === 'svg') return true
+  const src = payload.src || ''
+  const path = src.split(/[?#]/, 1)[0]
+  return /^data:image\/svg\+xml(?:[;,]|$)/i.test(src) || /\.svg$/i.test(path)
+}
+
+export function relativeScalePercent(scale: number, fitScale: number): number {
+  return Math.round((scale / fitScale) * 100)
 }
 
 export function wheelZoomDelta(deltaY: number, deltaMode = 0): number {
@@ -39,9 +52,16 @@ export function zoomBy(
   factor: number,
   originX: number,
   originY: number,
+  fitScale = 1,
 ): ViewTransform {
-  if (!Number.isFinite(factor) || factor <= 0) return transform
-  const nextScale = clamp(transform.scale * factor, MIN_VIEW_SCALE, MAX_VIEW_SCALE)
+  if (!Number.isFinite(factor) || factor <= 0 || !Number.isFinite(fitScale) || fitScale <= 0) {
+    return transform
+  }
+  const nextScale = clamp(
+    transform.scale * factor,
+    fitScale * MIN_VIEW_SCALE,
+    fitScale * MAX_VIEW_SCALE,
+  )
   if (nextScale === transform.scale) return transform
   const contentX = (originX - transform.x) / transform.scale
   const contentY = (originY - transform.y) / transform.scale
@@ -57,10 +77,11 @@ export function zoomAtPoint(
   cursorX: number,
   cursorY: number,
   deltaY: number,
+  fitScale = 1,
 ): ViewTransform {
   if (deltaY === 0) return transform
   const factor = Math.exp(-deltaY * 0.0015)
-  return zoomBy(transform, factor, cursorX, cursorY)
+  return zoomBy(transform, factor, cursorX, cursorY, fitScale)
 }
 
 export function panBy(transform: ViewTransform, dx: number, dy: number): ViewTransform {
@@ -73,11 +94,13 @@ export function fitTransform(
   contentW: number,
   contentH: number,
   padding = 48,
+  allowUpscale = false,
 ): ViewTransform {
   const availW = Math.max(1, viewportW - padding * 2)
   const availH = Math.max(1, viewportH - padding * 2)
   const fit = Math.min(availW / Math.max(contentW, 1), availH / Math.max(contentH, 1))
-  const scale = clamp(Math.min(fit, 1), MIN_VIEW_SCALE, MAX_VIEW_SCALE)
+  // 适配不设最小比例，否则超大图无法完整显示。位图默认不自动放大。
+  const scale = Math.min(fit, allowUpscale ? MAX_VIEW_SCALE : 1)
   return {
     scale,
     x: (viewportW - contentW * scale) / 2,
@@ -144,7 +167,7 @@ export function prepareSvgMarkup(svg: string): PreparedSvg {
   const style = root.getAttribute('style') || ''
   root.setAttribute(
     'style',
-    `${style}${style && !style.endsWith(';') ? ';' : ''}width:${size.width}px;height:${size.height}px;max-width:none;`,
+    `${style}${style && !style.endsWith(';') ? ';' : ''}width:${size.width}px;height:${size.height}px;max-width:none;display:block;`,
   )
   return { markup: root.outerHTML, width: size.width, height: size.height }
 }
@@ -215,6 +238,8 @@ function payloadFromFrame(frame: HTMLElement): MediaPayload | null {
     src,
     alt,
     label: kind === 'plantuml' ? 'PlantUML' : alt || '图片',
+    // PlantUML 渲染器输出 /svg/<编码>，没有 .svg 扩展名但仍是矢量图。
+    ...(kind === 'plantuml' ? { allowUpscale: true } : {}),
   }
 }
 

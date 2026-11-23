@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
+  canUpscaleMedia,
   decorateViewableMedia,
   fitTransform,
   mediaPayloadFromEventTarget,
+  panBy,
   prepareSvgMarkup,
+  relativeScalePercent,
   wheelZoomDelta,
   zoomAtPoint,
   zoomBy,
@@ -59,6 +62,25 @@ describe('mediaPayloadFromEventTarget', () => {
     })
     expect(mediaPayloadFromEventTarget(doc.body)).toBeNull()
   })
+
+  it('PlantUML 无扩展名的 SVG 地址仍允许自动放大', () => {
+    const html = '<figure class="plantuml-diagram"><img src="https://example.com/plantuml/svg/encoded"></figure>'
+    const doc = new DOMParser().parseFromString(decorateViewableMedia(html), 'text/html')
+    const payload = mediaPayloadFromEventTarget(doc.querySelector('img'))!
+    expect(payload.allowUpscale).toBe(true)
+    expect(canUpscaleMedia(payload)).toBe(true)
+  })
+})
+
+describe('canUpscaleMedia', () => {
+  it('识别内联 SVG、SVG 文件和 data URL，不自动放大普通位图', () => {
+    expect(canUpscaleMedia({ kind: 'svg', svg: '<svg/>', label: '图' })).toBe(true)
+    expect(canUpscaleMedia({ kind: 'image', src: 'diagram.SVG?version=2#view', label: '图' })).toBe(true)
+    expect(canUpscaleMedia({ kind: 'image', src: 'data:image/svg+xml;base64,abc', label: '图' })).toBe(true)
+    expect(canUpscaleMedia({ kind: 'image', src: 'data:image/svg+xml;charset=utf-8,%3Csvg', label: '图' })).toBe(true)
+    expect(canUpscaleMedia({ kind: 'image', src: 'photo.png?name=diagram.svg', label: '图片' })).toBe(false)
+    expect(canUpscaleMedia({ kind: 'image', src: 'data:image/png;base64,abc', label: '图片' })).toBe(false)
+  })
 })
 
 describe('prepareSvgMarkup', () => {
@@ -71,6 +93,7 @@ describe('prepareSvgMarkup', () => {
     expect(prepared.markup).not.toContain('id="g1"')
     expect(prepared.markup).toContain('url(#')
     expect(prepared.markup).not.toContain('url(#g1)')
+    expect(prepared.markup).toContain('display:block;')
   })
 })
 
@@ -101,7 +124,7 @@ describe('view transform', () => {
     expect(mined.scale).toBe(MIN_VIEW_SCALE)
   })
 
-  it('大图缩小适应窗口，小图保持原始尺寸并居中', () => {
+  it('大图缩小适应窗口，普通小位图保持原始尺寸并居中', () => {
     const large = fitTransform(800, 600, 1600, 1200)
     expect(large.scale).toBeLessThan(1)
     expect(large.x).toBeCloseTo((800 - 1600 * large.scale) / 2)
@@ -109,6 +132,59 @@ describe('view transform', () => {
     expect(small.scale).toBe(1)
     expect(small.x).toBeCloseTo(300)
     expect(small.y).toBeCloseTo(250)
+    expect(relativeScalePercent(small.scale, small.scale)).toBe(100)
+  })
+
+  it('小矢量图等比例放大到可用区域并居中，不拉伸也不裁切', () => {
+    const small = fitTransform(800, 600, 200, 100, 48, true)
+    expect(small.scale).toBeCloseTo(3.52)
+    expect(200 * small.scale).toBeCloseTo(800 - 96)
+    expect(100 * small.scale).toBeLessThanOrEqual(600 - 96)
+    expect(small.x).toBeCloseTo(48)
+    expect(small.y).toBeCloseTo((600 - 100 * small.scale) / 2)
+    expect(relativeScalePercent(small.scale, small.scale)).toBe(100)
+  })
+
+  it.each([[100000, 200000], [200000, 100000], [1000000000, 2000000000]])(
+    '超大图 %d × %d 可以缩到 MIN_VIEW_SCALE 以下，完整适配',
+    (w, h) => {
+      const fit = fitTransform(800, 600, w, h, 48, true)
+      expect(fit.scale).toBeGreaterThan(0)
+      expect(fit.scale).toBeLessThan(MIN_VIEW_SCALE)
+      expect(w * fit.scale).toBeLessThanOrEqual(800 - 96)
+      expect(h * fit.scale).toBeLessThanOrEqual(600 - 96)
+      expect(fit.x).toBeCloseTo((800 - w * fit.scale) / 2)
+      expect(fit.y).toBeCloseTo((600 - h * fit.scale) / 2)
+    },
+  )
+
+  it.each([[200, 100], [100000, 200000]])(
+    '50%%/200%% 相对 %d × %d 的适配基准，重适配回到居中的 100%%',
+    (w, h) => {
+      const fit = fitTransform(800, 600, w, h, 48, true)
+      const half = zoomBy(fit, 0.5, 400, 300, fit.scale)
+      const double = zoomBy(half, 4, 400, 300, fit.scale)
+      expect(half.scale).toBeCloseTo(fit.scale * 0.5, 10)
+      expect(double.scale).toBeCloseTo(fit.scale * 2, 10)
+      expect(relativeScalePercent(half.scale, fit.scale)).toBe(50)
+      expect(relativeScalePercent(double.scale, fit.scale)).toBe(200)
+      const dragged = panBy(double, 80, -30)
+      expect(dragged.x).not.toBe(fit.x)
+      const reset = fitTransform(800, 600, w, h, 48, true)
+      expect(reset).toEqual(fit)
+      expect(relativeScalePercent(reset.scale, reset.scale)).toBe(100)
+    },
+  )
+
+  it('巨大图在适配基准以下继续缩放不会突然跳回旧下限，光标锚点仍不动', () => {
+    const fit = fitTransform(800, 600, 100000, 200000, 48, true)
+    const next = zoomAtPoint(fit, 160, 220, 100, fit.scale)
+    expect(next.scale).toBeLessThan(fit.scale)
+    expect((160 - next.x) / next.scale).toBeCloseTo((160 - fit.x) / fit.scale)
+    expect((220 - next.y) / next.scale).toBeCloseTo((220 - fit.y) / fit.scale)
+    const min = zoomBy(fit, 0.01, 160, 220, fit.scale)
+    expect(min.scale).toBeCloseTo(fit.scale * MIN_VIEW_SCALE, 10)
+    expect(zoomBy(min, 0.5, 160, 220, fit.scale)).toBe(min)
   })
 
   it('按行滚动的滚轮换算成像素步进', () => {

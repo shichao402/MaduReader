@@ -336,15 +336,13 @@ describe('TabStore - Direct Coverage', () => {
       expect(tree).toBeDefined()
     })
 
-    it('should handle non-existent directory gracefully', async () => {
+    it('should expose root read failure instead of returning a successful empty tree', async () => {
       await store.setWorkingDirectory('/test')
       
       const fs = await import('@tauri-apps/plugin-fs')
       vi.mocked(fs.readDir).mockRejectedValue(new Error('Not found'))
       
-      const tree = await store.buildFileTree()
-      
-      expect(tree).toBeDefined()
+      await expect(store.buildFileTree()).rejects.toThrow('Not found')
     })
   })
 

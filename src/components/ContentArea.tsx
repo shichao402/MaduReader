@@ -7,6 +7,7 @@ import { renderMermaidCode } from '../composables/useMermaid'
 import { renderPlantUmlCode } from '../composables/usePlantUml'
 import { attachLinkHandler, detachLinkHandler } from '../composables/useLinkHandler'
 import { decorateViewableMedia, mediaPayloadFromEventTarget, type MediaPayload } from '../lib/mediaView'
+import { attachInlineDiagrams, type InlineDiagramsController } from '../lib/inlineDiagrams'
 import ExportDialog from './ExportDialog'
 import MediaLightbox from './MediaLightbox'
 import { cn } from '../lib/utils'
@@ -49,6 +50,8 @@ export default function ContentArea({
   const { tabStore, settingsStore } = useStores()
   const containerRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const inlineDiagramsRef = useRef<InlineDiagramsController | null>(null)
   const [renderedContent, setRenderedContent] = useState('')
   const [slideMode, setSlideMode] = useState(false)
   const [currentSlide, setCurrentSlide] = useState(0)
@@ -112,34 +115,43 @@ export default function ContentArea({
     }
   }, [tabStore.activeContent, slideMode, currentSlide, hasSlides, slides])
 
-  // 渲染完成后重新绑定链接处理，并在捕获阶段接管图表/图片点击
+  // 渲染完成后绑定正文图表和链接；折叠按钮必须先于全屏载荷在捕获阶段处理。
   useEffect(() => {
-    if (!contentRef.current) return
+    if (!contentRef.current || !scrollRef.current) return
     const el = contentRef.current
+    const diagrams = attachInlineDiagrams(el, scrollRef.current)
+    inlineDiagramsRef.current = diagrams
     detachLinkHandler(el)
     attachLinkHandler(el)
     const onMediaClick = (event: Event) => {
-      const payload = mediaPayloadFromEventTarget(event.target)
+      if (diagrams.handleToggle(event)) return
+      const payload = diagrams.payloadFromTarget(event.target) ?? mediaPayloadFromEventTarget(event.target)
       if (!payload) return
       event.preventDefault()
       event.stopPropagation()
       setMediaView(payload)
     }
     el.addEventListener('click', onMediaClick, true)
-    return () => el.removeEventListener('click', onMediaClick, true)
-  }, [renderedContent])
+    return () => {
+      el.removeEventListener('click', onMediaClick, true)
+      detachLinkHandler(el)
+      diagrams.dispose()
+      if (inlineDiagramsRef.current === diagrams) inlineDiagramsRef.current = null
+    }
+  }, [renderedContent, isEmpty, settingsStore.isDark])
 
   useEffect(() => {
     setMediaView(null)
   }, [renderedContent])
 
-  // 缩放
+  // 缩放不重建正文图表；transform 不触发 ResizeObserver，显式重测可视高度。
   useEffect(() => {
     if (contentRef.current) {
       contentRef.current.style.transform = `scale(${zoom})`
       contentRef.current.style.transformOrigin = 'top left'
+      inlineDiagramsRef.current?.refresh()
     }
-  }, [zoom])
+  }, [zoom, renderedContent, isEmpty])
 
   // 快捷键
   useEffect(() => {
@@ -439,7 +451,7 @@ export default function ContentArea({
           </p>
         </div>
       ) : (
-        <div className="flex-1 overflow-auto p-8 px-12">
+        <div ref={scrollRef} className="flex-1 overflow-auto p-8 px-12">
           <div
             ref={contentRef}
             className={cn(

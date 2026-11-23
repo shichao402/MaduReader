@@ -552,6 +552,64 @@ body {
   max-width: none;
 }
 
+/* Only PlantUML/Mermaid receive this class. Ordinary photos/icons keep intrinsic sizing. */
+.markdown-content .media-frame.inline-diagram {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+.markdown-content .inline-diagram-viewport {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+.markdown-content .inline-diagram-viewport > a {
+  display: block;
+  width: 100%;
+}
+.markdown-content .inline-diagram-viewport > svg,
+.markdown-content .inline-diagram-viewport > img,
+.markdown-content .inline-diagram-viewport > a > svg,
+.markdown-content .inline-diagram-viewport > a > img {
+  display: block;
+  max-width: none;
+  height: auto;
+  margin: 0;
+}
+.markdown-content .inline-diagram.is-collapsed .inline-diagram-viewport {
+  overflow: hidden;
+}
+.markdown-content .inline-diagram.is-collapsed .inline-diagram-viewport::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0;
+  height: 64px;
+  max-height: 25%;
+  background: linear-gradient(to bottom, transparent, var(--color-content));
+  pointer-events: none;
+}
+.markdown-content .inline-diagram-toggle {
+  display: block;
+  margin: 12px auto 0;
+  padding: 7px 14px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-content);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.markdown-content .inline-diagram-toggle[hidden] {
+  display: none;
+}
+.markdown-content .inline-diagram-toggle:hover,
+.markdown-content .inline-diagram-toggle:focus-visible {
+  border-color: var(--color-accent);
+  background: var(--color-bg-secondary);
+}
+
 .media-lightbox {
   position: fixed;
   inset: 0;

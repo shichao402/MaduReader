@@ -42,6 +42,7 @@ interface SidebarProps {
   tabs: Tab[]
   activeTabId: string | null
   workingDirectory: string
+  directoryError?: string | null
   activePath: string | null
   sidebarPosition: 'left' | 'right'
   sidebarWidth: number
@@ -182,6 +183,7 @@ export default function Sidebar({
   activeTabId,
   activePath,
   workingDirectory,
+  directoryError = null,
   sidebarPosition,
   sidebarWidth,
   onSidebarWidthChange,
@@ -270,6 +272,17 @@ export default function Sidebar({
               onCloseTab={onCloseTab}
               onSetActive={onSetActiveTab}
             />
+            {directoryError && (
+              <p
+                role="status"
+                className="mx-2 mb-2 rounded-md border border-[color:var(--color-border-base)] bg-[color:var(--color-bg-secondary)] px-2 py-2 text-xs text-[color:var(--color-text-secondary)]"
+                title={directoryError}
+              >
+                <span className="block font-medium">目录暂不可用或部分内容读取失败</span>
+                <span className="block mt-1 break-words">{directoryError}</span>
+                <span className="block mt-1">保留上次列表，目录恢复后自动重试。</span>
+              </p>
+            )}
             <FileTree
               nodes={fileTree}
               workingDirectory={workingDirectory}

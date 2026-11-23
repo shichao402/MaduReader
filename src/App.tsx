@@ -5,6 +5,7 @@ import SidebarIconBar from './components/SidebarIconBar'
 import ContentArea from './components/ContentArea'
 import CommandPalette from './components/CommandPalette'
 import SettingsDialog from './components/SettingsDialog'
+import { startDirectorySync } from './lib/directorySync'
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 
@@ -258,6 +259,13 @@ export default function App() {
     }
   }, [])
 
+  // 所有目录入口、会话恢复共用同一监听生命周期；虚拟工作区不接触原生文件系统。
+  useEffect(() => {
+    const root = tabStore.workingDirectory
+    if (!isTauri || !root || tabStore.isVirtualWorkspace) return
+    return startDirectorySync(root, () => tabStore.refreshFileTree())
+  }, [tabStore, tabStore.workingDirectory, tabStore.isVirtualWorkspace])
+
   // 监听设置打开事件（icon bar 等触发）
   useEffect(() => {
     const open = () => setSettingsOpen(true)
@@ -460,6 +468,7 @@ export default function App() {
             activeTabId={tabStore.activeTabId}
             activePath={tabStore.tabs.find((t) => t.id === tabStore.activeTabId)?.path ?? null}
             workingDirectory={tabStore.workingDirectory}
+            directoryError={tabStore.directoryError}
             sidebarPosition={sidebarPosition}
             sidebarWidth={sidebarWidth}
             onSidebarWidthChange={setSidebarWidth}

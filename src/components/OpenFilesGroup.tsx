@@ -9,6 +9,7 @@ export interface Tab {
   content: string
   isModified: boolean
   isUntitled: boolean
+  sourceMissing?: boolean
 }
 
 interface OpenFilesGroupProps {
@@ -22,8 +23,15 @@ interface OpenFilesGroupProps {
 /** 把绝对路径转换为相对工作目录的路径，失败时原样返回 */
 export function toRelative(path: string, root: string): string {
   const p = path.replace(/\\/g, '/')
-  const r = root.replace(/\\/g, '/').replace(/\/+$/, '')
-  if (r && p.toLowerCase().startsWith(r.toLowerCase() + '/')) return p.slice(r.length + 1)
+  const slashedRoot = root.replace(/\\/g, '/')
+  const r = slashedRoot === '/' ? '/' : slashedRoot.replace(/\/+$/, '')
+  const prefix = r === '/' ? '/' : `${r}/`
+  const windowsRoot = /^[a-z]:\//i.test(slashedRoot) || r.startsWith('//')
+  const matches = windowsRoot
+    ? p.toLowerCase().startsWith(prefix.toLowerCase())
+    : p.startsWith(prefix)
+
+  if (r && matches) return p.slice(prefix.length)
   return p
 }
 
@@ -91,6 +99,14 @@ export default function OpenFilesGroup({
                 <span className="block truncate" title={tab.path}>
                   {tab.name}
                 </span>
+                {tab.sourceMissing && (
+                  <span
+                    className="block text-[11px] leading-tight text-[color:var(--color-text-secondary)]"
+                    title="源文件已移动或删除，当前保留已打开的内容快照"
+                  >
+                    文件已移动或删除
+                  </span>
+                )}
                 {sub && (
                   <span
                     className="block truncate text-[11px] leading-tight opacity-60"
