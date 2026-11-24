@@ -1,6 +1,6 @@
 [package]
 name = "madureader"
-version = "0.1.3"
+version = "0.1.4"
 description = "MaduReader (Ma读) - A minimalistic Markdown reader built with Tauri 2.x and React 19"
 authors = ["firoyang"]
 edition = "2021"
