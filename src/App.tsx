@@ -9,6 +9,7 @@ import { startDirectorySync } from './lib/directorySync'
 import { openPaths, openUserPaths, type OpenErrorNotice } from './lib/openPaths'
 import { createOpenRequestReceiver } from './lib/openRequestReceiver'
 import OpenErrorBanner from './components/OpenErrorBanner'
+import { readingProgress } from './lib/readingProgress'
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 
@@ -146,6 +147,7 @@ export default function App() {
 
   const [openError, setOpenError] = useState<OpenErrorNotice | null>(null)
   const receiverRef = useRef<ReturnType<typeof createOpenRequestReceiver> | null>(null)
+  const bootReadyRef = useRef(false)
 
   // 初始化：页面先注册，再按既有规则恢复，最后开始处理队列。
   useEffect(() => {
@@ -157,6 +159,9 @@ export default function App() {
       const tabStore = getTabStore()
       try {
         await settingsStore.loadSettings()
+        if (cancelled) return
+        tabStore.applyFilePolicy(settingsStore.settings)
+        await readingProgress.load()
         void import('./lib/perfLog').then(({ perfLog }) =>
           perfLog(`frontend: settings loaded in ${(performance.now() - bootT0).toFixed(0)}ms`),
         )
@@ -205,6 +210,8 @@ export default function App() {
         }
       } catch (e) {
         console.error('[MaduReader] init error:', e)
+      } finally {
+        if (!cancelled) { bootReadyRef.current = true; window.dispatchEvent(new Event('madu:session-ready')) }
       }
     }
     init()
@@ -213,6 +220,19 @@ export default function App() {
       receiver?.stop()
       if (receiverRef.current === receiver) receiverRef.current = null
     }
+  }, [])
+
+  // 设置立即生效；常驻页面每分钟/重新获得焦点时清理到期条目，不读取休眠正文。
+  useEffect(() => {
+    tabStore.applyFilePolicy(settingsStore.settings)
+  }, [tabStore, settingsStore.settings.maxOpenFiles, settingsStore.settings.inactiveRetentionDays, settingsStore.settings.openFilesSort])
+
+  useEffect(() => {
+    const cleanup = () => getTabStore().cleanupInactiveFiles()
+    const timer = window.setInterval(cleanup, 60000)
+    window.addEventListener('focus', cleanup)
+    document.addEventListener('visibilitychange', cleanup)
+    return () => { window.clearInterval(timer); window.removeEventListener('focus', cleanup); document.removeEventListener('visibilitychange', cleanup) }
   }, [])
 
   // 所有目录入口、会话恢复共用同一监听生命周期；虚拟工作区不接触原生文件系统。
@@ -237,6 +257,7 @@ export default function App() {
   useEffect(() => {
     let timer: number | undefined
     const persist = () => {
+      if (!bootReadyRef.current) return
       window.clearTimeout(timer)
       timer = window.setTimeout(() => {
         const settingsStore = getSettingsStore()
@@ -248,6 +269,9 @@ export default function App() {
     }
     // 点 X 驻留托盘前，Rust 侧会立即触发本事件：不等防抖，马上落盘会话
     const flushNow = () => {
+      window.dispatchEvent(new Event('madu:before-document-change'))
+      void readingProgress.flush()
+      if (!bootReadyRef.current) return
       window.clearTimeout(timer)
       const settingsStore = getSettingsStore()
       if (!settingsStore.settings.restoreSession) return
@@ -256,9 +280,13 @@ export default function App() {
       )
     }
     window.addEventListener('madu:hide-before-close', flushNow)
+    window.addEventListener('pagehide', flushNow)
+    window.addEventListener('madu:session-ready', persist)
     const unsubscribe = getTabStore().subscribe(persist)
     return () => {
       window.removeEventListener('madu:hide-before-close', flushNow)
+      window.removeEventListener('pagehide', flushNow)
+      window.removeEventListener('madu:session-ready', persist)
       unsubscribe()
       window.clearTimeout(timer)
     }
@@ -373,7 +401,11 @@ export default function App() {
           <Sidebar
             view={sidebarView}
             fileTree={tabStore.fileTree}
-            tabs={tabStore.tabs}
+            tabs={tabStore.sortedTabs}
+            inactiveFiles={tabStore.inactiveFiles}
+            openFilesSort={settingsStore.settings.openFilesSort}
+            onSortFiles={sort => settingsStore.update({ openFilesSort: sort })}
+            onCloseInactiveFile={path => tabStore.closeInactiveFile(path)}
             activeTabId={tabStore.activeTabId}
             activePath={tabStore.tabs.find((t) => t.id === tabStore.activeTabId)?.path ?? null}
             workingDirectory={tabStore.workingDirectory}

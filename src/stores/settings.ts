@@ -2,6 +2,7 @@
 // React 侧通过 useSyncExternalStore 订阅，不再依赖任何响应式框架。
 
 import { invoke } from '@tauri-apps/api/core'
+import { DEFAULT_FILE_POLICY, sanitizeFilePolicy, type FilePolicy } from '../lib/fileActivity'
 
 export interface MermaidConfig {
   theme: string
@@ -9,7 +10,7 @@ export interface MermaidConfig {
   startOnLoad: boolean
 }
 
-export interface Settings {
+export interface Settings extends FilePolicy {
   theme: 'light' | 'dark' | 'system'
   fontSize: number
   zoom: number
@@ -34,6 +35,7 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
+  ...DEFAULT_FILE_POLICY,
   theme: 'system',
   fontSize: 16,
   zoom: 100,
@@ -105,7 +107,7 @@ class SettingsStore {
 
   /** 显式更新入口：合并部分字段后通知并持久化 */
   update(patch: Partial<Settings>, options: { save?: boolean } = {}): void {
-    this._settings = { ...this._settings, ...patch }
+    this._settings = { ...this._settings, ...patch, ...sanitizeFilePolicy({ ...this._settings, ...patch }) }
     if (options.save !== false) {
       this.saveSettings()
     }
@@ -137,7 +139,7 @@ class SettingsStore {
         const data = window.localStorage.getItem(STORAGE_KEY)
         if (data) {
           const loaded = JSON.parse(data)
-          this._settings = { ...DEFAULT_SETTINGS, ...loaded }
+          this._settings = { ...DEFAULT_SETTINGS, ...loaded, ...sanitizeFilePolicy(loaded) }
         }
         this._isLoaded = true
         this.applyTheme()
@@ -154,7 +156,7 @@ class SettingsStore {
 
       if (data) {
         const loaded = JSON.parse(data)
-        this._settings = { ...DEFAULT_SETTINGS, ...loaded }
+        this._settings = { ...DEFAULT_SETTINGS, ...loaded, ...sanitizeFilePolicy(loaded) }
       }
       this._isLoaded = true
       this.applyTheme()

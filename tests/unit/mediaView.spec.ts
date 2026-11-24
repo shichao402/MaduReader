@@ -93,7 +93,30 @@ describe('prepareSvgMarkup', () => {
     expect(prepared.markup).not.toContain('id="g1"')
     expect(prepared.markup).toContain('url(#')
     expect(prepared.markup).not.toContain('url(#g1)')
-    expect(prepared.markup).toContain('display:block;')
+    expect(new DOMParser().parseFromString(prepared.markup, 'text/html').querySelector('svg')!.style.display).toBe('block')
+  })
+
+  it('真实 Mermaid 多行 HTML 标签的 outerHTML 仍使用 viewBox，不退回 800×600', () => {
+    const prepared = prepareSvgMarkup('<svg xmlns="http://www.w3.org/2000/svg" width="100%" style="max-width:1095px" viewBox="4 4 1095 628"><foreignObject width="200" height="80"><div xmlns="http://www.w3.org/1999/xhtml"><p>ChessController<br>StateMachine<br>ChessState</p></div></foreignObject></svg>')
+    expect(prepared.width).toBe(1095)
+    expect(prepared.height).toBe(628)
+    const doc = new DOMParser().parseFromString(prepared.markup, 'text/html')
+    const svg = doc.querySelector('svg')!
+    expect(svg.getAttribute('width')).toBe('1095')
+    expect(svg.getAttribute('height')).toBe('628')
+    expect(svg.querySelectorAll('foreignObject br')).toHaveLength(2)
+    expect(svg.querySelector('foreignObject')?.textContent).toContain('ChessController')
+    expect(svg.style.getPropertyValue('max-width')).toBe('none')
+    expect(svg.style.getPropertyPriority('width')).toBe('important')
+  })
+
+  it('正文留下的 important 尺寸限制不能压缩全屏图形', () => {
+    const prepared = prepareSvgMarkup('<svg viewBox="0 0 1200 700" style="width:100%!important;height:auto!important;max-width:300px!important;max-height:200px!important"/>')
+    const svg = new DOMParser().parseFromString(prepared.markup, 'text/html').querySelector('svg')!
+    expect(svg.style.width).toBe('1200px')
+    expect(svg.style.height).toBe('700px')
+    expect(svg.style.maxWidth).toBe('none')
+    expect(svg.style.maxHeight).toBe('none')
   })
 })
 

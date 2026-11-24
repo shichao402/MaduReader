@@ -9,7 +9,7 @@ import {
   setFileAssociation,
   type AssocStatus,
 } from '../lib/fileAssociations'
-import type { Settings } from '../stores/settings'
+import { DEFAULT_SETTINGS, type Settings } from '../stores/settings'
 
 interface SettingsDialogProps {
   open: boolean
@@ -66,6 +66,9 @@ type Draft = Pick<
   | 'codeHighlightTheme'
   | 'showLineNumbers'
   | 'restoreSession'
+  | 'maxOpenFiles'
+  | 'inactiveRetentionDays'
+  | 'openFilesSort'
   | 'closeToTray'
   | 'mermaidConfig'
   | 'plantUmlServer'
@@ -143,6 +146,7 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
   function resetToDefaults() {
     if (confirm('确定要重置所有设置为默认值吗？')) {
       commit({
+        ...DEFAULT_SETTINGS,
         theme: 'system',
         fontSize: 16,
         zoom: 100,
@@ -207,6 +211,9 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
     codeHighlightTheme: s.codeHighlightTheme,
     showLineNumbers: s.showLineNumbers,
     restoreSession: s.restoreSession,
+    maxOpenFiles: s.maxOpenFiles,
+    inactiveRetentionDays: s.inactiveRetentionDays,
+    openFilesSort: s.openFilesSort,
     closeToTray: s.closeToTray,
     mermaidConfig: s.mermaidConfig,
     plantUmlServer: s.plantUmlServer,
@@ -292,6 +299,31 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
                       {opt.label}
                     </option>
                   ))}
+                </select>
+              </div>
+            </div>
+
+            <div className={section}>
+              <h3 className={sectionTitle}>文件管理</h3>
+              <div className="mb-3">
+                <label className={label} htmlFor="max-open-files">已打开文件上限</label>
+                <input id="max-open-files" type="number" min={1} max={200} step={1} className={input}
+                  defaultValue={draft.maxOpenFiles} key={`limit-${draft.maxOpenFiles}`}
+                  onBlur={event => { if (event.target.value.trim()) commit({ maxOpenFiles: Number(event.target.value) }); else event.target.value = String(draft.maxOpenFiles) }} />
+                <p className="mt-1 text-xs text-[color:var(--color-text-secondary)]">1～200 份。超出时最近最少使用的文档移入「不活跃」并释放正文；当前文档、未保存文档及丢失源文件的快照不会被自动移出。</p>
+              </div>
+              <div className="mb-3">
+                <label className={label} htmlFor="inactive-retention-days">不活跃文件保留天数</label>
+                <input id="inactive-retention-days" type="number" min={1} max={365} step={1} className={input}
+                  defaultValue={draft.inactiveRetentionDays} key={`retention-${draft.inactiveRetentionDays}`}
+                  onBlur={event => { if (event.target.value.trim()) commit({ inactiveRetentionDays: Number(event.target.value) }); else event.target.value = String(draft.inactiveRetentionDays) }} />
+                <p className="mt-1 text-xs text-[color:var(--color-text-secondary)]">1～365 天，从移入不活跃时开始计时。到期仅关闭列表条目，不删除磁盘文件，也不清除阅读位置。</p>
+              </div>
+              <div>
+                <label className={label} htmlFor="open-files-sort">文件列表排序</label>
+                <select id="open-files-sort" className={input} value={draft.openFilesSort}
+                  onChange={event => commit({ openFilesSort: event.target.value as Settings['openFilesSort'] })}>
+                  <option value="recent">最近阅读</option><option value="frequent">常用优先</option><option value="name">文件名</option>
                 </select>
               </div>
             </div>

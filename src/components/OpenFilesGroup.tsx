@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ChevronDown, ChevronRight, FileText, X } from 'lucide-react'
 import { cn } from '../lib/utils'
+import type { OpenFilesSort } from '../lib/fileActivity'
 
 export interface Tab {
   id: string
@@ -13,7 +14,11 @@ export interface Tab {
 }
 
 interface OpenFilesGroupProps {
-  tabs: Tab[]
+  tabs: Array<Pick<Tab, 'id' | 'path' | 'name'> & Partial<Pick<Tab, 'isModified' | 'isUntitled' | 'sourceMissing'>>>
+  label?: string
+  inactive?: boolean
+  sort?: OpenFilesSort
+  onSortChange?: (sort: OpenFilesSort) => void
   activeTabId: string | null
   workingDirectory: string
   onCloseTab: (id: string) => void
@@ -48,6 +53,10 @@ export default function OpenFilesGroup({
   workingDirectory,
   onCloseTab,
   onSetActive,
+  label = '已打开',
+  inactive = false,
+  sort = 'recent',
+  onSortChange,
 }: OpenFilesGroupProps) {
   const [collapsed, setCollapsed] = useState(false)
 
@@ -63,15 +72,30 @@ export default function OpenFilesGroup({
 
   return (
     <div className="pb-1 mb-1 border-b border-[color:var(--color-border-base)]">
+      <div className="flex items-center pr-2">
       <button
-        className="flex w-full items-center gap-1.5 px-2 py-1.5 text-xs font-semibold uppercase tracking-wide text-[color:var(--color-text-secondary)] hover:text-[color:var(--color-text-primary)] transition-colors"
+        className="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1.5 text-xs font-semibold uppercase tracking-wide text-[color:var(--color-text-secondary)] hover:text-[color:var(--color-text-primary)] transition-colors"
         onClick={() => setCollapsed((v) => !v)}
-        title={collapsed ? '展开已打开的文件' : '折叠已打开的文件'}
+        aria-expanded={!collapsed}
+        title={collapsed ? `展开${label}的文件` : `折叠${label}的文件`}
       >
         {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
-        <span>已打开</span>
+        <span>{label}</span>
         <span className="font-normal normal-case tracking-normal opacity-70">{tabs.length}</span>
       </button>
+      {onSortChange && <select
+        aria-label="已打开文件排序"
+        title="排序仅调整列表，超出上限时仍优先休眠最近最少使用的文件"
+        className="max-w-[90px] rounded border border-[color:var(--color-border-base)] bg-[color:var(--color-sidebar)] px-1 py-0.5 text-[11px] text-[color:var(--color-text-secondary)]"
+        value={sort}
+        onChange={event => onSortChange(event.target.value as OpenFilesSort)}
+      >
+        <option value="recent">最近阅读</option>
+        <option value="frequent">常用优先</option>
+        <option value="name">文件名</option>
+      </select>}
+      </div>
+      {inactive && !collapsed && <p className="px-2 pb-1 text-[11px] text-[color:var(--color-text-tertiary)]">仅保留路径，点击重新读取</p>}
 
       {!collapsed && (
         <div className="flex flex-col gap-0.5">
@@ -84,6 +108,9 @@ export default function OpenFilesGroup({
               key={tab.id}
               role="button"
               tabIndex={0}
+              data-file-path={tab.isUntitled ? undefined : tab.path}
+              data-file-name={tab.name}
+              data-file-is-dir="false"
               className={cn(
                 'group flex items-center gap-2 py-1.5 pr-2 cursor-pointer text-sm rounded-md transition-colors',
                 'text-[color:var(--color-text-primary)] hover:bg-[color:var(--color-sidebar-hover)]',
@@ -92,7 +119,7 @@ export default function OpenFilesGroup({
               )}
               style={{ paddingLeft: 8 }}
               onClick={() => onSetActive(tab.id)}
-              onKeyDown={(e) => e.key === 'Enter' && onSetActive(tab.id)}
+              onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onSetActive(tab.id) } }}
             >
               <FileText size={14} className="shrink-0 opacity-70" />
               <span className="flex-1 min-w-0">

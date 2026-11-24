@@ -159,6 +159,19 @@ describe('MediaLightbox fit and loading', () => {
     expect(observers[0].observe).toHaveBeenCalledWith(viewport())
   })
 
+  it('Mermaid 多行 HTML 标签全屏使用真实尺寸适配，SVG 输出尺寸与 transform 一致', () => {
+    render({
+      kind: 'svg', label: '棋子状态机',
+      svg: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" viewBox="4 4 1095 628" style="max-width:1095px"><foreignObject width="200" height="80"><div xmlns="http://www.w3.org/1999/xhtml"><p>ChessController<br>StateMachine<br>ChessState</p></div></foreignObject></svg>',
+    })
+    expectTransform(fitTransform(800, 600, 1095, 628, 48, true))
+    const svg = stage().querySelector('svg')!
+    expect(svg.getAttribute('width')).toBe('1095')
+    expect(svg.getAttribute('height')).toBe('628')
+    expect(svg.querySelectorAll('br')).toHaveLength(2)
+    expect(fitButton().textContent).toBe('100%')
+  })
+
   it('巨大 SVG 首次显示完整，不受旧绝对最小缩放限制', () => {
     render(HUGE_SVG)
     const fit = readTransform()

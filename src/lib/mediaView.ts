@@ -155,8 +155,10 @@ function namespaceSvgIds(svg: Element, prefix: string): void {
 }
 
 export function prepareSvgMarkup(svg: string): PreparedSvg {
-  const parsed = new DOMParser().parseFromString(svg, 'image/svg+xml')
-  const root = parsed.documentElement
+  // 载荷来自 HTML DOM 的 outerHTML：Mermaid foreignObject 内的 <br> 等
+  // HTML 空元素不一定序列化为 XML 的 <br/>，不能用 XML 解析后误走兜底尺寸。
+  const parsed = new DOMParser().parseFromString(svg, 'text/html')
+  const root = parsed.body.firstElementChild
   if (!root || root.tagName.toLowerCase() !== 'svg') {
     return { markup: svg, width: 800, height: 600 }
   }
@@ -164,11 +166,13 @@ export function prepareSvgMarkup(svg: string): PreparedSvg {
   const size = readSvgSize(root)
   root.setAttribute('width', String(size.width))
   root.setAttribute('height', String(size.height))
-  const style = root.getAttribute('style') || ''
-  root.setAttribute(
-    'style',
-    `${style}${style && !style.endsWith(';') ? ';' : ''}width:${size.width}px;height:${size.height}px;max-width:none;display:block;`,
-  )
+  const style = (root as SVGSVGElement).style
+  // 通过 CSSOM 替换原属性，不靠拼接重复的 important 声明覆盖。
+  style.setProperty('width', `${size.width}px`, 'important')
+  style.setProperty('height', `${size.height}px`, 'important')
+  style.setProperty('max-width', 'none', 'important')
+  style.setProperty('max-height', 'none', 'important')
+  style.setProperty('display', 'block')
   return { markup: root.outerHTML, width: size.width, height: size.height }
 }
 

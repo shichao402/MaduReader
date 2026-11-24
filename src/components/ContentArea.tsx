@@ -12,6 +12,7 @@ import ExportDialog from './ExportDialog'
 import MediaLightbox from './MediaLightbox'
 import { cn } from '../lib/utils'
 import { openUserPaths } from '../lib/openPaths'
+import { useReadingPosition } from '../hooks/useReadingPosition'
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 
@@ -53,7 +54,9 @@ export default function ContentArea({
   const contentRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const inlineDiagramsRef = useRef<InlineDiagramsController | null>(null)
-  const [renderedContent, setRenderedContent] = useState('')
+  const [rendered, setRendered] = useState({ html: '', tabId: '', path: '', source: '' })
+  const renderedContent = rendered.html
+  const ready = rendered.tabId === tabStore.activeTabId && rendered.source === tabStore.activeContent
   const [slideMode, setSlideMode] = useState(false)
   const [currentSlide, setCurrentSlide] = useState(0)
   const [exportOpen, setExportOpen] = useState(false)
@@ -89,9 +92,12 @@ export default function ContentArea({
       const settingsStore = getSettingsStore()
       if (!tabStore.activeTab || !tabStore.activeContent) {
         setIsEmpty(true)
-        setRenderedContent('')
+        setRendered({ html: '', tabId: '', path: '', source: '' })
         return
       }
+      const tabId = tabStore.activeTabId!
+      const path = tabStore.activeTab.path
+      const fullSource = tabStore.activeContent
       setIsEmpty(false)
       try {
         const source =
@@ -101,20 +107,22 @@ export default function ContentArea({
         let html = await renderMarkdownAsync(source)
         html = await renderMermaidCode(html)
         html = renderPlantUmlCode(html, settingsStore.settings.plantUmlServer)
-        html = await resolveLocalImageSources(html, tabStore.activeTab.path)
+        html = await resolveLocalImageSources(html, path)
         html = decorateViewableMedia(html)
-        if (!cancelled) setRenderedContent(html)
+        if (!cancelled) setRendered({ html, tabId, path, source: fullSource })
       } catch (e) {
         console.error('[ContentArea] Render error:', e)
         if (!cancelled)
-          setRenderedContent(`<p style="color: var(--color-danger);">渲染错误: ${e}</p>`)
+          setRendered({ html: `<p>文档渲染失败，请重新打开。</p>`, tabId, path, source: fullSource })
       }
     }
     render()
     return () => {
       cancelled = true
     }
-  }, [tabStore.activeContent, slideMode, currentSlide, hasSlides, slides])
+  }, [tabStore.activeTabId, tabStore.activeContent, slideMode, currentSlide, hasSlides, slides])
+
+  useReadingPosition(scrollRef, contentRef, rendered.path, rendered.source, rendered, ready && !slideMode)
 
   // 渲染完成后绑定正文图表和链接；折叠按钮必须先于全屏载荷在捕获阶段处理。
   useEffect(() => {
@@ -139,7 +147,7 @@ export default function ContentArea({
       diagrams.dispose()
       if (inlineDiagramsRef.current === diagrams) inlineDiagramsRef.current = null
     }
-  }, [renderedContent, isEmpty, settingsStore.isDark])
+  }, [rendered, isEmpty, ready, settingsStore.isDark])
 
   useEffect(() => {
     setMediaView(null)
@@ -152,7 +160,7 @@ export default function ContentArea({
       contentRef.current.style.transformOrigin = 'top left'
       inlineDiagramsRef.current?.refresh()
     }
-  }, [zoom, renderedContent, isEmpty])
+  }, [zoom, rendered, isEmpty, ready])
 
   // 快捷键
   useEffect(() => {
@@ -241,7 +249,7 @@ export default function ContentArea({
         target.scrollIntoView({ behavior: 'smooth', block: 'start' })
       } else {
         // 找不到目标标题时回退到文档顶部，保证点击有反馈
-        containerRef.current?.scrollTo({ top: 0, behavior: 'smooth' as ScrollBehavior })
+        scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' as ScrollBehavior })
       }
     }
     window.addEventListener('trigger-open-file', onOpenFile)
@@ -428,8 +436,10 @@ export default function ContentArea({
             也可以将 .md 文件或整个文件夹拖拽到窗口
           </p>
         </div>
+      ) : !ready ? (
+        <div role="status" className="flex-1 flex items-center justify-center text-sm text-[color:var(--color-text-secondary)]">正在加载文档…</div>
       ) : (
-        <div ref={scrollRef} className="flex-1 overflow-auto p-8 px-12">
+        <div key={rendered.tabId} ref={scrollRef} data-reading-path={rendered.path} style={{ overflowAnchor: 'none' }} className="flex-1 overflow-auto p-8 px-12">
           <div
             ref={contentRef}
             className={cn(
@@ -437,7 +447,7 @@ export default function ContentArea({
               slideMode &&
                 'min-h-[calc(100vh-180px)] p-12 border border-[color:var(--color-border-base)] rounded-2xl shadow-lg bg-[color:var(--color-content)]',
             )}
-            style={{ fontSize: `${settingsStore.settings?.fontSize ?? 16}px` }}
+            style={{ fontSize: `${settingsStore.settings?.fontSize ?? 16}px`, transform: `scale(${zoom})`, transformOrigin: 'top left' }}
             dangerouslySetInnerHTML={{ __html: renderedContent }}
           />
         </div>

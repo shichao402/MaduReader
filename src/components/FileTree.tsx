@@ -56,6 +56,10 @@ const TreeItem = memo(function TreeItem({
       <div
         role="button"
         tabIndex={0}
+        data-file-path={node.path}
+        data-file-name={node.name}
+        data-file-is-dir={node.isDir}
+        title={node.path}
         className={cn(
           'flex items-center gap-2 py-1.5 pr-2 cursor-pointer select-none text-sm rounded-md transition-colors animate-fade-in',
           'text-[color:var(--color-text-primary)] hover:bg-[color:var(--color-sidebar-hover)]',

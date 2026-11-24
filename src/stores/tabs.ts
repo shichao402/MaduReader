@@ -3,6 +3,7 @@
 
 import type { SessionData } from '../lib/session'
 import { perfLog } from '../lib/perfLog'
+import { DEFAULT_FILE_POLICY, DAY_MS, compareFileActivity, filePathKey, sanitizeFilePolicy, sanitizeActivity, sanitizeInactive, type FilePolicy, type InactiveFile } from '../lib/fileActivity'
 
 export interface Tab {
   id: string
@@ -12,6 +13,8 @@ export interface Tab {
   isModified: boolean
   isUntitled: boolean
   sourceMissing?: boolean
+  lastAccessedAt?: number
+  accessCount?: number
 }
 
 export interface FileNode {
@@ -113,6 +116,8 @@ function preserveExpansion(nodes: FileNode[], previous: FileNode[]): void {
 
 class TabStore {
   private _tabs: Tab[] = []
+  private _inactiveFiles: InactiveFile[] = []
+  private _filePolicy: FilePolicy = { ...DEFAULT_FILE_POLICY }
   private _activeTabId: string | null = null
   private _workingDirectory = ''
   private _fileTree: FileNode[] = []
@@ -120,6 +125,7 @@ class TabStore {
   private _isVirtualWorkspace = false
   private _directoryError: string | null = null
   private _directoryGeneration = 0
+  private _openGeneration = 0
 
   // 跨 reset/切目录仍持有实际扫描锁。请求序号只递增，所有等待者共享补扫闭环。
   private _refreshTask: Promise<void> | null = null
@@ -145,11 +151,12 @@ class TabStore {
   }
 
   /** 所有目录入口共用的代次边界；同路径恢复/重建也可以强制隔离。 */
-  private changeWorkspace(dir: string, virtual = false, force = false): boolean {
+  private changeWorkspace(dir: string, virtual = false, force = false, invalidateOpens = true): boolean {
     const normalized = normalizePath(dir)
     const changed = normalized !== this._workingDirectory || virtual !== this._isVirtualWorkspace
     if (!force && !changed) return false
     this._directoryGeneration += 1
+    if (invalidateOpens) this._openGeneration += 1
     this._workingDirectory = normalized
     this._isVirtualWorkspace = virtual
     if (changed) {
@@ -166,11 +173,13 @@ class TabStore {
 
   /** 测试隔离用：恢复到初始空状态，但不释放尚未完成的实际扫描锁。 */
   reset(): void {
-    const changed = this._tabs.length > 0 || this._activeTabId !== null ||
+    const changed = this._tabs.length > 0 || this._inactiveFiles.length > 0 || this._activeTabId !== null ||
       this._workingDirectory !== '' || this._fileTree.length > 0 ||
       this._sidebarView !== 'tree' || this._isVirtualWorkspace || this._directoryError !== null
     this.changeWorkspace('', false, true)
     this._tabs = []
+    this._inactiveFiles = []
+    this._filePolicy = { ...DEFAULT_FILE_POLICY }
     this._activeTabId = null
     this._fileTree = []
     this._directoryError = null
@@ -244,10 +253,62 @@ class TabStore {
     return this.activeTab?.content || ''
   }
 
+  get inactiveFiles(): InactiveFile[] {
+    return [...this._inactiveFiles].sort((a, b) => compareFileActivity(a, b, this._filePolicy.openFilesSort))
+  }
+
+  get sortedTabs(): Tab[] {
+    return [...this._tabs].sort((a, b) => compareFileActivity(a, b, this._filePolicy.openFilesSort))
+  }
+
+  /** 变更文档前让正文同步保存位置，不能等 React 清理时再读取已移除的 DOM。 */
+  private beforeDocumentChange(): void {
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('madu:before-document-change'))
+  }
+
+  private touch(tab: Tab, now = Date.now()): void {
+    tab.lastAccessedAt = now
+    tab.accessCount = Math.min(Number.MAX_SAFE_INTEGER, (tab.accessCount ?? 0) + 1)
+  }
+
+  /** 最近最少使用者先休眠；活动/未保存/无磁盘路径/丢失源快照永不自动丢弃。 */
+  private maintainFiles(now = Date.now()): boolean {
+    const before = this._inactiveFiles.length
+    this._inactiveFiles = this._inactiveFiles.filter(file => now - file.inactiveSince < this._filePolicy.inactiveRetentionDays * DAY_MS)
+    let changed = before !== this._inactiveFiles.length
+    const victims = this._tabs.filter(tab => tab.id !== this._activeTabId && !tab.isModified && !tab.isUntitled && !tab.sourceMissing)
+      .sort((a, b) => (a.lastAccessedAt ?? 0) - (b.lastAccessedAt ?? 0) || (a.accessCount ?? 1) - (b.accessCount ?? 1))
+    while (this._tabs.length > this._filePolicy.maxOpenFiles && victims.length) {
+      const tab = victims.shift()!
+      this._tabs = this._tabs.filter(item => item !== tab)
+      this._inactiveFiles = this._inactiveFiles.filter(item => filePathKey(item.path) !== filePathKey(tab.path))
+      this._inactiveFiles.push({ path: tab.path, lastAccessedAt: tab.lastAccessedAt ?? now, accessCount: tab.accessCount ?? 1, inactiveSince: now })
+      changed = true
+    }
+    return changed
+  }
+
+  applyFilePolicy(policy: Partial<FilePolicy>): void {
+    const next = sanitizeFilePolicy({ ...this._filePolicy, ...policy })
+    const changed = JSON.stringify(next) !== JSON.stringify(this._filePolicy)
+    this._filePolicy = next
+    if (this.maintainFiles() || changed) this.emit()
+  }
+
+  cleanupInactiveFiles(now = Date.now()): void {
+    if (this.maintainFiles(now)) this.emit()
+  }
+
+  closeInactiveFile(path: string): void {
+    const next = this._inactiveFiles.filter(file => filePathKey(file.path) !== filePathKey(path))
+    if (next.length !== this._inactiveFiles.length) { this._inactiveFiles = next; this.emit() }
+  }
+
   // ---- 业务方法 ----
 
   async openFile(path: string): Promise<void> {
     const normalizedPath = normalizePath(path)
+    const generation = this._openGeneration
     console.log('[Tabs] openFile called for:', normalizedPath)
     try {
       let content: string
@@ -257,32 +318,41 @@ class TabStore {
         const { allowAndReadTextFile } = await import('../lib/fsAccess')
         content = await allowAndReadTextFile(path)
       }
+      if (generation !== this._openGeneration) throw new Error('工作区已变化，请重新打开文件')
       const name = getBaseName(normalizedPath)
 
       // 已打开的正文仍是原快照；成功读到源文件仅清除丢失标记。
-      const existingTab = this._tabs.find((t) => t.path === normalizedPath && !t.isUntitled)
+      const existingTab = this._tabs.find((t) => filePathKey(t.path) === filePathKey(normalizedPath) && !t.isUntitled)
       if (existingTab) {
-        const changed = this._activeTabId !== existingTab.id || existingTab.sourceMissing === true
+        this.beforeDocumentChange()
         this._activeTabId = existingTab.id
+        this.touch(existingTab)
         if (existingTab.sourceMissing) existingTab.sourceMissing = false
-        if (changed) this.emit()
+        this.maintainFiles()
+        this.emit()
         return
       }
 
+      const dormant = this._inactiveFiles.find(file => filePathKey(file.path) === filePathKey(normalizedPath))
       const newTab: Tab = {
         id: `tab-${Date.now()}-${++this._tabCounter}`,
         path: normalizedPath,
         name,
         content,
+        lastAccessedAt: Date.now(),
+        accessCount: Math.min(Number.MAX_SAFE_INTEGER, (dormant?.accessCount ?? 0) + 1),
         isModified: false,
         isUntitled: false,
       }
 
+      this.beforeDocumentChange()
+      this._inactiveFiles = this._inactiveFiles.filter(file => filePathKey(file.path) !== filePathKey(normalizedPath))
       this._tabs.push(newTab)
       this._activeTabId = newTab.id
+      this.maintainFiles()
 
       const directoryChanged = !this._workingDirectory &&
-        this.changeWorkspace(getDirName(normalizedPath), this._isVirtualWorkspace)
+        this.changeWorkspace(getDirName(normalizedPath), this._isVirtualWorkspace, false, false)
       this.emit()
       if (directoryChanged) await this.refreshFileTree()
     } catch (e) {
@@ -301,8 +371,11 @@ class TabStore {
       isUntitled: true,
     }
 
+    this.beforeDocumentChange()
+    this.touch(tab)
     this._tabs.push(tab)
     this._activeTabId = tab.id
+    this.maintainFiles()
     this.emit()
     return tab
   }
@@ -311,12 +384,14 @@ class TabStore {
     const index = this._tabs.findIndex((t) => t.id === id)
     if (index === -1) return
 
+    this.beforeDocumentChange()
     this._tabs.splice(index, 1)
 
     if (this._activeTabId === id) {
       if (this._tabs.length > 0) {
         const newIndex = Math.min(index, this._tabs.length - 1)
         this._activeTabId = this._tabs[newIndex].id
+        this.touch(this._tabs[newIndex])
       } else {
         this._activeTabId = null
       }
@@ -325,8 +400,12 @@ class TabStore {
   }
 
   setActiveTab(id: string): void {
-    if (this._tabs.some((t) => t.id === id)) {
+    const tab = this._tabs.find(item => item.id === id)
+    if (tab && this._activeTabId !== id) {
+      this.beforeDocumentChange()
       this._activeTabId = id
+      this.touch(tab)
+      this.maintainFiles()
       this.emit()
     }
   }
@@ -575,7 +654,9 @@ class TabStore {
   }
 
   async setVirtualWorkspace(root: string, files: VirtualFile[]): Promise<void> {
+    this.beforeDocumentChange()
     this.changeWorkspace(root, true, true)
+    this._inactiveFiles = []
     this._tabs = []
     this._activeTabId = null
     this._virtualFiles.clear()
@@ -611,70 +692,78 @@ class TabStore {
       workingDirectory: this._workingDirectory,
       openPaths: this._tabs.filter((t) => !t.isUntitled).map((t) => t.path),
       activePath: this.activeTab && !this.activeTab.isUntitled ? this.activeTab.path : null,
+      fileActivity: this._tabs.filter(tab => !tab.isUntitled).map(tab => ({ path: tab.path, lastAccessedAt: tab.lastAccessedAt ?? Date.now(), accessCount: tab.accessCount ?? 1 })),
+      inactiveFiles: this._inactiveFiles.map(file => ({ ...file })),
     }
   }
 
-  /** 启动时恢复上次会话：并行读文件，保留已有快照，目录扫描仍放后台。 */
+  /** 启动恢复先筛选上限，再读正文；休眠文件不做 exists/read，也不持有快照。 */
   async restoreSession(session: SessionData): Promise<void> {
     const root = normalizePath(session.workingDirectory || this._workingDirectory)
-    // 浏览器示例恢复同一个虚拟根时沿用虚拟文件；真实会话则退出虚拟工作区。
     const virtual = this._isVirtualWorkspace && root === this._workingDirectory
     const workspaceChanged = this.changeWorkspace(root, virtual, true)
     const generation = this._directoryGeneration
     if (workspaceChanged) this.emit()
+    const now = Date.now()
+    const activity = new Map((session.fileActivity ?? []).map(raw => sanitizeActivity(raw, now))
+      .filter(item => item !== null).map(item => [filePathKey(item.path), item]))
     const activeNormalized = session.activePath ? normalizePath(session.activePath) : null
-    const paths = activeNormalized
-      ? [activeNormalized, ...session.openPaths.filter((p) => normalizePath(p) !== activeNormalized)]
-      : session.openPaths
+    const paths: string[] = []
+    const seenPaths = new Set<string>()
+    for (const path of activeNormalized ? [activeNormalized, ...session.openPaths] : session.openPaths) {
+      const normalized = normalizePath(path)
+      const key = filePathKey(normalized)
+      if (!seenPaths.has(key)) { seenPaths.add(key); paths.push(normalized) }
+    }
+    const known = new Set(this._tabs.filter(tab => !tab.isUntitled).map(tab => filePathKey(tab.path)))
+    const ranked = paths.filter(path => !known.has(filePathKey(path))).sort((a, b) => {
+      if (a === activeNormalized) return -1
+      if (b === activeNormalized) return 1
+      return (activity.get(filePathKey(b))?.lastAccessedAt ?? 0) - (activity.get(filePathKey(a))?.lastAccessedAt ?? 0)
+    })
+    const selected = ranked.slice(0, Math.max(0, this._filePolicy.maxOpenFiles - this._tabs.length))
+    const dormant = (session.inactiveFiles ?? []).map(raw => sanitizeInactive(raw, now)).filter(item => item !== null)
+      .filter(item => now - item.inactiveSince < this._filePolicy.inactiveRetentionDays * DAY_MS)
+    for (const path of ranked.slice(selected.length)) {
+      dormant.push({ ...(activity.get(filePathKey(path)) ?? { path, lastAccessedAt: now, accessCount: 1 }), path, inactiveSince: now })
+    }
     const restoreT0 = performance.now()
-    const results = await Promise.all(paths.map(async (path) => {
-      const normalizedPath = normalizePath(path)
+    const results = await Promise.all(selected.map(async path => {
       try {
-        let content: string
-        if (this._virtualFiles.has(normalizedPath)) {
-          content = this._virtualFiles.get(normalizedPath) || ''
-        } else {
-          const { allowAndReadTextFile } = await import('../lib/fsAccess')
-          content = await allowAndReadTextFile(path)
-        }
-        return { normalizedPath, content }
-      } catch (e) {
-        console.error('[Tabs] Failed to restore session file:', path, e)
+        const content = this._virtualFiles.has(path) ? this._virtualFiles.get(path) ?? ''
+          : await (await import('../lib/fsAccess')).allowAndReadTextFile(path)
+        return { path, content }
+      } catch (error) {
+        console.error('[Tabs] Failed to restore session file:', path, error)
+        dormant.push({ ...(activity.get(filePathKey(path)) ?? { path, lastAccessedAt: now, accessCount: 1 }), path, inactiveSince: now })
         return null
       }
     }))
     void perfLog(`frontend: session file reads generation=${generation} done in ${(performance.now() - restoreT0).toFixed(0)}ms`)
-    // reset、换目录或另一轮恢复之后，不允许迟到的正文或扫描覆盖新会话。
     if (generation !== this._directoryGeneration) return
-
+    this.beforeDocumentChange()
     let changed = false
     for (const result of results) {
-      if (!result) continue
-      if (this._tabs.some((t) => t.path === result.normalizedPath && !t.isUntitled)) continue
-      this._tabs.push({
-        id: `tab-${Date.now()}-${++this._tabCounter}`,
-        path: result.normalizedPath,
-        name: getBaseName(result.normalizedPath),
-        content: result.content,
-        isModified: false,
-        isUntitled: false,
-      })
+      if (!result || this._tabs.some(tab => filePathKey(tab.path) === filePathKey(result.path) && !tab.isUntitled)) continue
+      const metadata = activity.get(filePathKey(result.path))
+      this._tabs.push({ id: `tab-${Date.now()}-${++this._tabCounter}`, path: result.path, name: getBaseName(result.path),
+        content: result.content, isModified: false, isUntitled: false, lastAccessedAt: metadata?.lastAccessedAt ?? now, accessCount: metadata?.accessCount ?? 1 })
       changed = true
     }
-    // 会话缺 workingDirectory 时，用第一个文件所在目录兜底。
-    if (!this._workingDirectory && this._tabs.length > 0) {
-      changed = this.changeWorkspace(getDirName(this._tabs[0].path), virtual) || changed
-    }
-    if (activeNormalized) {
-      const target = this._tabs.find((t) => t.path === activeNormalized)
-      if (target && this._activeTabId !== target.id) {
-        this._activeTabId = target.id
-        changed = true
-      }
-    }
+    const loaded = new Set(this._tabs.filter(tab => !tab.isUntitled).map(tab => filePathKey(tab.path)))
+    const inactive = new Map(this._inactiveFiles.map(file => [filePathKey(file.path), file]))
+    for (const file of dormant) if (!loaded.has(filePathKey(file.path))) inactive.set(filePathKey(file.path), { ...file, path: normalizePath(file.path) })
+    if (JSON.stringify(this._inactiveFiles) !== JSON.stringify([...inactive.values()])) changed = true
+    this._inactiveFiles = [...inactive.values()]
+    if (!this._workingDirectory && this._tabs.length) changed = this.changeWorkspace(getDirName(this._tabs[0].path), virtual) || changed
+    const target = this._tabs.find(tab => activeNormalized && filePathKey(tab.path) === filePathKey(activeNormalized))
+      ?? (this._activeTabId ? null : this._tabs[0])
+    if (target && this._activeTabId !== target.id) { this._activeTabId = target.id; target.lastAccessedAt = now; changed = true }
+    changed = this.maintainFiles(now) || changed
     if (changed) this.emit()
     if (this._workingDirectory) void this.refreshFileTree()
   }
+
 }
 
 /** 判断文件名是否为本阅读器支持的 Markdown 文件 */

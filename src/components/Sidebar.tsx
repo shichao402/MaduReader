@@ -10,6 +10,8 @@ import {
 import { cn } from '../lib/utils'
 import FileTree, { type FileNode } from './FileTree'
 import OpenFilesGroup, { type Tab } from './OpenFilesGroup'
+import FileContextMenu from './FileContextMenu'
+import type { InactiveFile, OpenFilesSort } from '../lib/fileActivity'
 
 export interface Heading {
   level: number
@@ -40,6 +42,10 @@ interface SidebarProps {
   view: SidebarView
   fileTree: FileNode[]
   tabs: Tab[]
+  inactiveFiles?: InactiveFile[]
+  openFilesSort?: OpenFilesSort
+  onSortFiles?: (sort: OpenFilesSort) => void
+  onCloseInactiveFile?: (path: string) => void
   activeTabId: string | null
   workingDirectory: string
   directoryError?: string | null
@@ -180,6 +186,10 @@ export default function Sidebar({
   view,
   fileTree,
   tabs,
+  inactiveFiles = [],
+  openFilesSort = 'recent',
+  onSortFiles,
+  onCloseInactiveFile,
   activeTabId,
   activePath,
   workingDirectory,
@@ -262,7 +272,11 @@ export default function Sidebar({
       </div>
 
       {/* 视图内容 */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden">
+      <FileContextMenu
+        className="flex-1 overflow-y-auto overflow-x-hidden"
+        workingDirectory={workingDirectory}
+        onOpenFile={onOpenFile}
+      >
         {view === 'tree' ? (
           <>
             <OpenFilesGroup
@@ -271,6 +285,17 @@ export default function Sidebar({
               workingDirectory={workingDirectory}
               onCloseTab={onCloseTab}
               onSetActive={onSetActiveTab}
+              sort={openFilesSort}
+              onSortChange={onSortFiles}
+            />
+            <OpenFilesGroup
+              label="不活跃"
+              inactive
+              tabs={inactiveFiles.map(file => ({ id: file.path, path: file.path, name: file.path.split('/').pop() || file.path }))}
+              activeTabId={null}
+              workingDirectory={workingDirectory}
+              onSetActive={onOpenFile}
+              onCloseTab={path => onCloseInactiveFile?.(path)}
             />
             {directoryError && (
               <p
@@ -294,7 +319,7 @@ export default function Sidebar({
         ) : (
           <OutlineList source={tabs.find((t) => t.id === activeTabId)?.content ?? ''} />
         )}
-      </div>
+      </FileContextMenu>
 
       {/* 宽度拖拽手柄：贴侧栏外边缘，悬停/拖拽显示 accent 指示线 */}
       {/* side=手柄贴合的侧栏边缘（朝向内容区的一侧）：左栏贴右缘、右栏贴左缘 */}
