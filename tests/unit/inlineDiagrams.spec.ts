@@ -583,7 +583,7 @@ describe('lifecycle and themed styles', () => {
   it('渐隐和按钮使用主题变量，裁切只作用于容器且不遮挡点击，普通图片没有强制 width', () => {
     const css = readFileSync(`${process.cwd()}/src/styles/tokens.css`, 'utf8')
     expect(css).toMatch(/\.inline-diagram\.is-collapsed \.inline-diagram-viewport\s*\{\s*overflow: hidden;/)
-    expect(css).toMatch(/linear-gradient\(to bottom, transparent, var\(--color-content\)\)/)
+    expect(css).toMatch(/linear-gradient\(to bottom, transparent, var\(--diagram-background, var\(--color-content\)\)\)/)
     expect(css).toMatch(/\.inline-diagram-viewport::after\s*\{[^}]*pointer-events: none;/)
     expect(css).toMatch(/\.inline-diagram-toggle\[hidden\]\s*\{\s*display: none;/)
     expect(css).toMatch(/\.media-frame\.inline-diagram\s*\{\s*width: 100%;/)

@@ -63,6 +63,10 @@ export default function ContentArea({
   const [exportOpen, setExportOpen] = useState(false)
   const [isEmpty, setIsEmpty] = useState(true)
   const [mediaView, setMediaView] = useState<MediaPayload | null>(null)
+  const selectedMediaIndex = useRef<number | null>(null)
+  const diagramDark = settingsStore.isDark
+  const mermaidTheme = settingsStore.settings.mermaidConfig?.theme ?? 'default'
+  const plantUmlServer = settingsStore.settings.plantUmlServer
 
   const zoom = (settingsStore.currentZoom ?? 100) / 100
   const slides = useMemo(
@@ -90,7 +94,6 @@ export default function ContentArea({
     let cancelled = false
     async function render() {
       const tabStore = getTabStore()
-      const settingsStore = getSettingsStore()
       if (!tabStore.activeTab || !tabStore.activeContent) {
         setIsEmpty(true)
         setRendered({ html: '', tabId: '', path: '', source: '' })
@@ -106,8 +109,8 @@ export default function ContentArea({
             ? slides[currentSlide] || slides[0]
             : tabStore.activeContent
         let html = await renderMarkdownAsync(source)
-        html = await renderMermaidCode(html)
-        html = renderPlantUmlCode(html, settingsStore.settings.plantUmlServer)
+        html = await renderMermaidCode(html, { dark: diagramDark, theme: mermaidTheme })
+        html = renderPlantUmlCode(html, plantUmlServer, diagramDark)
         html = await resolveLocalImageSources(html, path)
         html = decorateViewableMedia(html)
         if (!cancelled) setRendered({ html, tabId, path, source: fullSource })
@@ -121,7 +124,7 @@ export default function ContentArea({
     return () => {
       cancelled = true
     }
-  }, [tabStore.activeTabId, tabStore.activeContent, slideMode, currentSlide, hasSlides, slides])
+  }, [tabStore.activeTabId, tabStore.activeContent, slideMode, currentSlide, hasSlides, slides, diagramDark, mermaidTheme, plantUmlServer])
 
   useReadingPosition(scrollRef, contentRef, rendered.path, rendered.source, rendered, ready && !slideMode)
 
@@ -139,20 +142,30 @@ export default function ContentArea({
       if (!payload) return
       event.preventDefault()
       event.stopPropagation()
+      const frame = event.target instanceof Element ? event.target.closest('.media-frame') : null
+      selectedMediaIndex.current = frame ? Array.from(el.querySelectorAll('.media-frame')).indexOf(frame) : null
       setMediaView(payload)
     }
     el.addEventListener('click', onMediaClick, true)
+    // Refresh an open preview with the new themed SVG/URL instead of closing it.
+    const index = selectedMediaIndex.current
+    const selected = index === null ? null : el.querySelectorAll('.media-frame')[index]
+    if (selected) {
+      const next = diagrams.payloadFromTarget(selected) ?? mediaPayloadFromEventTarget(selected)
+      if (next) setMediaView(current => current ? next : null)
+    }
     return () => {
       el.removeEventListener('click', onMediaClick, true)
       detachLinkHandler(el)
       diagrams.dispose()
       if (inlineDiagramsRef.current === diagrams) inlineDiagramsRef.current = null
     }
-  }, [rendered, isEmpty, ready, settingsStore.isDark])
+  }, [rendered, isEmpty, ready])
 
   useEffect(() => {
+    selectedMediaIndex.current = null
     setMediaView(null)
-  }, [renderedContent])
+  }, [tabStore.activeTabId, tabStore.activeContent, slideMode, currentSlide])
 
   // 缩放不重建正文图表；transform 不触发 ResizeObserver，显式重测可视高度。
   useEffect(() => {

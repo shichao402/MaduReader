@@ -11,6 +11,7 @@ export interface MediaPayload {
   svg?: string
   label: string
   allowUpscale?: boolean
+  diagramTheme?: 'light' | 'dark'
 }
 
 export interface PreparedSvg {
@@ -203,7 +204,9 @@ export function decorateViewableMedia(html: string): string {
   doc.querySelectorAll('svg.mermaid-svg').forEach((svg) => {
     if (svg.closest('.media-frame')) return
     if (svg.parentElement?.closest('svg')) return
-    wrapElement(doc, svg, 'mermaid')
+    const frame = wrapElement(doc, svg, 'mermaid')
+    const theme = svg.getAttribute('data-diagram-theme')
+    if (theme) frame.setAttribute('data-diagram-theme', theme)
   })
 
   doc.querySelectorAll('figure.plantuml-diagram').forEach((figure) => {
@@ -228,10 +231,12 @@ export function decorateViewableMedia(html: string): string {
 
 function payloadFromFrame(frame: HTMLElement): MediaPayload | null {
   const kind = frame.dataset.mediaKind
+  const theme = frame.dataset.diagramTheme
+  const diagramTheme = theme === 'light' || theme === 'dark' ? theme : undefined
   if (kind === 'mermaid') {
     const svg = frame.querySelector('svg')
     if (!svg) return null
-    return { kind: 'svg', svg: svg.outerHTML, label: '流程图' }
+    return { kind: 'svg', svg: svg.outerHTML, label: '流程图', ...(diagramTheme ? { diagramTheme } : {}) }
   }
   const img = frame.querySelector('img')
   const src = img?.getAttribute('src') || ''
@@ -243,7 +248,7 @@ function payloadFromFrame(frame: HTMLElement): MediaPayload | null {
     alt,
     label: kind === 'plantuml' ? 'PlantUML' : alt || '图片',
     // PlantUML 渲染器输出 /svg/<编码>，没有 .svg 扩展名但仍是矢量图。
-    ...(kind === 'plantuml' ? { allowUpscale: true } : {}),
+    ...(kind === 'plantuml' ? { allowUpscale: true, ...(diagramTheme ? { diagramTheme } : {}) } : {}),
   }
 }
 

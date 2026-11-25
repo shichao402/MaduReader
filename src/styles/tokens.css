@@ -503,6 +503,14 @@ body {
   transform: translateY(0);
 }
 
+/* Diagram palettes travel with the rendered SVG, including explicit Mermaid themes. */
+[data-diagram-theme="light"] {
+  --diagram-background: #fafaf9;
+}
+[data-diagram-theme="dark"] {
+  --diagram-background: #1c1917;
+}
+
 /* ===== 图表 / 图片全屏查看 ===== */
 .markdown-content .media-frame {
   position: relative;
@@ -563,6 +571,9 @@ body {
   width: 100%;
   min-width: 0;
 }
+.markdown-content .media-frame[data-diagram-theme] .inline-diagram-viewport {
+  background: var(--diagram-background);
+}
 .markdown-content .inline-diagram-viewport > a {
   display: block;
   width: 100%;
@@ -585,7 +596,7 @@ body {
   inset: auto 0 0;
   height: 64px;
   max-height: 25%;
-  background: linear-gradient(to bottom, transparent, var(--color-content));
+  background: linear-gradient(to bottom, transparent, var(--diagram-background, var(--color-content)));
   pointer-events: none;
 }
 .markdown-content .inline-diagram-toggle {
@@ -750,6 +761,9 @@ body {
   display: block;
   background: #ffffff;
   box-shadow: var(--shadow-lg);
+}
+.media-lightbox-plate[data-diagram-theme] {
+  background: var(--diagram-background);
 }
 .media-lightbox-stage img.media-lightbox-plate,
 .media-lightbox-stage svg {

@@ -50,7 +50,7 @@ const zoomOptions = [
 ]
 
 const mermaidThemeOptions = [
-  { value: 'default', label: '默认' },
+  { value: 'default', label: '跟随阅读器（默认）' },
   { value: 'base', label: '基础' },
   { value: 'dark', label: '暗色' },
   { value: 'forest', label: '森林' },

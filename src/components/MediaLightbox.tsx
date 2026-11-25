@@ -33,6 +33,7 @@ function MediaLightboxView({ payload, onClose }: MediaLightboxProps) {
     [payload.kind, payload.svg],
   )
   const allowUpscale = canUpscaleMedia(payload)
+  const diagramTheme = payload.diagramTheme
   const rootRef = useRef<HTMLDivElement>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
@@ -238,11 +239,13 @@ function MediaLightboxView({ payload, onClose }: MediaLightboxProps) {
             {payload.kind === 'svg' && prepared ? (
               <div
                 className="media-lightbox-plate"
+                data-diagram-theme={diagramTheme}
                 dangerouslySetInnerHTML={{ __html: prepared.markup }}
               />
             ) : (
               <img
                 className="media-lightbox-plate"
+                data-diagram-theme={diagramTheme}
                 src={payload.src}
                 alt={payload.alt || payload.label}
                 style={natural ? { width: natural.w, height: natural.h } : undefined}

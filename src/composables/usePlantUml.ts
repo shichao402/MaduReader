@@ -36,7 +36,18 @@ export function plantUmlSvgUrl(source: string, server: string): string {
   return `${normalizedServer}/svg/${encodePlantUml(source)}`
 }
 
-export function renderPlantUmlCode(html: string, server: string): string {
+// Apply a built-in palette only to diagrams without an explicit author-selected theme.
+// This affects the render request, never the Markdown stored on disk.
+export function withPlantUmlTheme(source: string, dark: boolean): string {
+  if (/^[ \t]*!theme\b/m.test(source)) return source
+  const palette = dark ? '!theme cyborg\n' : ''
+  const defaults = palette + 'skinparam backgroundColor transparent\n'
+  const start = /^[ \t]*@start\w+[^\r\n]*(?:\r?\n|$)/m
+  if (start.test(source)) return source.replace(start, line => line.replace(/\r?\n?$/, '\n') + defaults)
+  return '@startuml\n' + defaults + source + '\n@enduml'
+}
+
+export function renderPlantUmlCode(html: string, server: string, dark = false): string {
   const parser = new DOMParser()
   const doc = parser.parseFromString(html, 'text/html')
   const codeBlocks = doc.querySelectorAll('pre code.language-plantuml, pre code[class*="plantuml"]')
@@ -48,11 +59,15 @@ export function renderPlantUmlCode(html: string, server: string): string {
     const source = code.textContent || ''
     const figure = doc.createElement('figure')
     figure.className = 'plantuml-diagram'
+    const explicitTheme = source.match(/^[ \t]*!theme[ \t]+([^\s]+)/m)?.[1]
+    figure.dataset.diagramTheme = explicitTheme
+      ? (/^(cyborg|black-knight|carbon-gray|crt-(amber|green)|mars|metal|spacelab)$/.test(explicitTheme) ? 'dark' : 'light')
+      : (dark ? 'dark' : 'light')
 
     const img = doc.createElement('img')
     img.alt = 'PlantUML diagram'
     img.loading = 'lazy'
-    img.src = plantUmlSvgUrl(source, server)
+    img.src = plantUmlSvgUrl(withPlantUmlTheme(source, dark), server)
 
     figure.appendChild(img)
     pre.replaceWith(figure)
