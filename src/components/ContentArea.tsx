@@ -198,8 +198,10 @@ export default function ContentArea({
   // 缩放不重建正文图表；transform 不触发 ResizeObserver，显式重测可视高度。
   useEffect(() => {
     if (contentRef.current) {
-      if (slideMode) contentRef.current.style.transform = `scale(${zoom})`
-      contentRef.current.style.transformOrigin = 'top left'
+      if (slideMode) {
+        contentRef.current.style.transform = `scale(${zoom})`
+        contentRef.current.style.transformOrigin = 'top left'
+      }
       inlineDiagramsRef.current?.refresh()
     }
   }, [zoom, rendered, isEmpty, ready, slideMode, settingsStore.settings.fontSize])
@@ -502,7 +504,7 @@ export default function ContentArea({
               slideMode &&
                 'min-h-[calc(100vh-180px)] p-12 border border-[color:var(--color-border-base)] rounded-2xl shadow-lg bg-[color:var(--color-content)]',
             )}
-            style={{ fontSize: `${settingsStore.settings?.fontSize ?? 16}px`, ...(slideMode ? { transform: `scale(${zoom})` } : {}), transformOrigin: 'top left' }}
+            style={{ fontSize: `${settingsStore.settings?.fontSize ?? 16}px`, ...(slideMode ? { transform: `scale(${zoom})` } : {}), transformOrigin: slideMode ? 'top left' : 'bottom right' }}
             dangerouslySetInnerHTML={{ __html: renderedContent }}
           />
           </div>

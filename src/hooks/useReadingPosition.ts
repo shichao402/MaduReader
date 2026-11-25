@@ -1,5 +1,5 @@
 import { useLayoutEffect, type RefObject } from 'react'
-import { captureReadingPosition, contentSignature, readingPositionTop, readingProgress, type ReadingPosition } from '../lib/readingProgress'
+import { captureReadingPosition, contentSignature, maxScrollTop, readingPositionTop, readingProgress, type ReadingPosition } from '../lib/readingProgress'
 
 export function attachReadingPosition(
   scroll: HTMLElement,
@@ -13,6 +13,10 @@ export function attachReadingPosition(
   let restoring = true
   let changedByUser = false
   let frame: number | undefined
+  let settle: ReturnType<typeof setTimeout> | undefined
+  // Text-only documents settle synchronously. Decorated media frames can report a second height after first paint.
+  const needsSettle = Boolean(saved?.top && root.querySelector('.media-frame'))
+  if (needsSettle) scroll.dataset.readingPositionRestoring = 'true'
   const save = () => { if (!disposed) onSave(captureReadingPosition(scroll, root, signature)) }
   const restore = () => {
     if (disposed || !restoring) return
@@ -22,20 +26,31 @@ export function attachReadingPosition(
     if (disposed || !restoring) return
     restore()
     restoring = false
+    clearTimeout(settle)
+    delete scroll.dataset.readingPositionRestoring
     save()
   }
   const schedule = () => {
+    clearTimeout(settle)
     if (frame !== undefined) cancelAnimationFrame(frame)
     frame = requestAnimationFrame(() => {
       frame = undefined
       restore()
       const pending = [...root.querySelectorAll('img')].some(image => !image.complete)
-      if (!pending) finish()
+      // The scaled column/media placeholder may not have reached its final height yet.
+      // Keep the original position until it is reachable; the timeout still handles truly shortened documents.
+      const awaitingHeight = saved?.signature === signature && saved.top > maxScrollTop(scroll)
+      if (!pending && !awaitingHeight) {
+        if (needsSettle) settle = setTimeout(finish, 150)
+        else finish()
+      }
     })
   }
   const intent = () => {
     changedByUser = true
     restoring = false
+    clearTimeout(settle)
+    delete scroll.dataset.readingPositionRestoring
   }
   const onScroll = () => {
     if (!restoring || changedByUser) save()
@@ -53,8 +68,13 @@ export function attachReadingPosition(
   for (const event of ['wheel', 'touchstart', 'pointerdown', 'keydown']) scroll.addEventListener(event, intent, { passive: true })
   root.addEventListener('load', schedule, true)
   root.addEventListener('error', schedule, true)
-  // A width reflow restores the current block, not this opening session's old pixel top.
-  scroll.addEventListener('madu:reading-reflow', intent)
+  const reflow = (event: Event) => {
+    // Async media height arriving during first paint should complete the saved position.
+    // An explicit width reflow instead keeps the current reading block.
+    if (restoring && (event as CustomEvent<{ widthChanged?: boolean }>).detail?.widthChanged === false) schedule()
+    else intent()
+  }
+  scroll.addEventListener('madu:reading-reflow', reflow)
   window.addEventListener('scroll-to-heading', intent)
   window.addEventListener('trigger-find', intent)
   const beforeChange = () => { if (!restoring) save() }
@@ -66,13 +86,15 @@ export function attachReadingPosition(
     if (!restoring && scroll.isConnected) save()
     disposed = true
     clearTimeout(timeout)
+    clearTimeout(settle)
+    delete scroll.dataset.readingPositionRestoring
     if (frame !== undefined) cancelAnimationFrame(frame)
     observer?.disconnect()
     scroll.removeEventListener('scroll', onScroll)
     for (const event of ['wheel', 'touchstart', 'pointerdown', 'keydown']) scroll.removeEventListener(event, intent)
     root.removeEventListener('load', schedule, true)
     root.removeEventListener('error', schedule, true)
-    scroll.removeEventListener('madu:reading-reflow', intent)
+    scroll.removeEventListener('madu:reading-reflow', reflow)
     window.removeEventListener('scroll-to-heading', intent)
     window.removeEventListener('trigger-find', intent)
     window.removeEventListener('madu:before-document-change', beforeChange)
