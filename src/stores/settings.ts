@@ -2,6 +2,7 @@
 // React 侧通过 useSyncExternalStore 订阅，不再依赖任何响应式框架。
 
 import { invoke } from '@tauri-apps/api/core'
+import { sanitizePageWidth } from '../lib/readingColumn'
 import { DEFAULT_FILE_POLICY, sanitizeFilePolicy, type FilePolicy } from '../lib/fileActivity'
 
 export interface MermaidConfig {
@@ -13,6 +14,7 @@ export interface MermaidConfig {
 export interface Settings extends FilePolicy {
   theme: 'light' | 'dark' | 'system'
   fontSize: number
+  pageWidth: number
   zoom: number
   sidebarCollapsed: boolean
   sidebarPosition: 'left' | 'right'
@@ -23,6 +25,8 @@ export interface Settings extends FilePolicy {
   autoSave: boolean
   restoreSession: boolean
   closeToTray: boolean
+  closePreviewOnBlankDoubleClick: boolean
+  previewModifierWheelPan: boolean
   mermaidConfig: MermaidConfig
   plantUmlServer: string
   proxyEnabled: boolean
@@ -38,6 +42,7 @@ export const DEFAULT_SETTINGS: Settings = {
   ...DEFAULT_FILE_POLICY,
   theme: 'system',
   fontSize: 16,
+  pageWidth: 800,
   zoom: 100,
   sidebarCollapsed: false,
   sidebarPosition: 'left',
@@ -48,6 +53,8 @@ export const DEFAULT_SETTINGS: Settings = {
   autoSave: false,
   restoreSession: true,
   closeToTray: true,
+  closePreviewOnBlankDoubleClick: false,
+  previewModifierWheelPan: false,
   mermaidConfig: {
     theme: 'default',
     securityLevel: 'loose',
@@ -74,6 +81,8 @@ type Listener = () => void
 class SettingsStore {
   private _settings: Settings = { ...DEFAULT_SETTINGS }
   private _isLoaded = false
+  private pageWidthTimer: ReturnType<typeof setTimeout> | undefined
+  private saveQueue: Promise<boolean> = Promise.resolve(true)
 
   private _version = 0
   private _listeners = new Set<Listener>()
@@ -96,6 +105,8 @@ class SettingsStore {
 
   /** 测试隔离用：恢复默认设置 */
   reset(): void {
+    clearTimeout(this.pageWidthTimer)
+    this.pageWidthTimer = undefined
     this._settings = { ...DEFAULT_SETTINGS }
     this._isLoaded = false
     this.emit()
@@ -107,7 +118,8 @@ class SettingsStore {
 
   /** 显式更新入口：合并部分字段后通知并持久化 */
   update(patch: Partial<Settings>, options: { save?: boolean } = {}): void {
-    this._settings = { ...this._settings, ...patch, ...sanitizeFilePolicy({ ...this._settings, ...patch }) }
+    this._settings = { ...this._settings, ...patch, ...sanitizeFilePolicy({ ...this._settings, ...patch }),
+      pageWidth: sanitizePageWidth(patch.pageWidth === undefined ? this._settings.pageWidth : patch.pageWidth) }
     if (options.save !== false) {
       this.saveSettings()
     }
@@ -139,7 +151,7 @@ class SettingsStore {
         const data = window.localStorage.getItem(STORAGE_KEY)
         if (data) {
           const loaded = JSON.parse(data)
-          this._settings = { ...DEFAULT_SETTINGS, ...loaded, ...sanitizeFilePolicy(loaded) }
+          this._settings = { ...DEFAULT_SETTINGS, ...loaded, ...sanitizeFilePolicy(loaded), pageWidth: sanitizePageWidth(loaded.pageWidth) }
         }
         this._isLoaded = true
         this.applyTheme()
@@ -156,7 +168,7 @@ class SettingsStore {
 
       if (data) {
         const loaded = JSON.parse(data)
-        this._settings = { ...DEFAULT_SETTINGS, ...loaded, ...sanitizeFilePolicy(loaded) }
+        this._settings = { ...DEFAULT_SETTINGS, ...loaded, ...sanitizeFilePolicy(loaded), pageWidth: sanitizePageWidth(loaded.pageWidth) }
       }
       this._isLoaded = true
       this.applyTheme()
@@ -170,16 +182,42 @@ class SettingsStore {
     }
   }
 
-  async saveSettings(): Promise<boolean> {
+  setPageWidth(value: number): void {
+    if (!this._isLoaded) return
+    const width = sanitizePageWidth(value)
+    if (width === this._settings.pageWidth) return
+    this.update({ pageWidth: width }, { save: false })
+    clearTimeout(this.pageWidthTimer)
+    this.pageWidthTimer = setTimeout(() => { void this.flushPageWidth() }, 600)
+  }
+
+  flushPageWidth(): Promise<boolean> {
+    if (!this._isLoaded || this.pageWidthTimer === undefined) return Promise.resolve(true)
+    clearTimeout(this.pageWidthTimer)
+    this.pageWidthTimer = undefined
+    return this.saveSettings()
+  }
+
+  saveSettings(): Promise<boolean> {
+    clearTimeout(this.pageWidthTimer)
+    this.pageWidthTimer = undefined
+    const content = JSON.stringify(this._settings, null, 2)
+    // Browser storage remains synchronous; native writes must finish in request order.
+    if (!isTauriRuntime()) return this.writeSettings(content)
+    this.saveQueue = this.saveQueue.then(() => this.writeSettings(content))
+    return this.saveQueue
+  }
+
+  private async writeSettings(content: string): Promise<boolean> {
     try {
       if (!isTauriRuntime()) {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(this._settings))
+        window.localStorage.setItem(STORAGE_KEY, content)
         return true
       }
 
       await invoke('write_data_file', {
         fileName: 'config.json',
-        content: JSON.stringify(this._settings, null, 2),
+        content,
       })
       return true
     } catch (e) {
@@ -275,3 +313,11 @@ class SettingsStore {
 }
 
 export const settingsStore = new SettingsStore()
+if (typeof window !== 'undefined') {
+  for (const event of ['madu:hide-before-close', 'pagehide']) {
+    window.addEventListener(event, () => { void settingsStore.flushPageWidth() })
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') void settingsStore.flushPageWidth()
+  })
+}

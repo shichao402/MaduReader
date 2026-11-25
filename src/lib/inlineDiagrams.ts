@@ -1,4 +1,5 @@
 import { mediaPayloadFromEventTarget, type MediaPayload } from './mediaView'
+import { autoScaleLimit, measureDiagramSvg, loadPlantUmlMetrics, svgSize, absoluteLength, type DiagramMetrics, type MediaSource } from './diagramMetrics'
 
 interface DiagramSize {
   width: number
@@ -31,6 +32,8 @@ interface DiagramState {
   failed: boolean
   expanded: boolean
   layout: InlineDiagramLayout | null
+  metrics: DiagramMetrics | null
+  source: MediaSource
   removeListeners: () => void
 }
 
@@ -64,38 +67,26 @@ export function inlineDiagramLayout(
   availableWidth: number,
   viewportHeight: number,
   displayScale = 1,
+  maxAutoScale = Infinity,
 ): InlineDiagramLayout | null {
   if (![size.width, size.height, availableWidth, viewportHeight, displayScale].every(positive)) {
     return null
   }
-  const height = availableWidth * (size.height / size.width)
+  const width = size.width * Math.min(availableWidth / size.width, maxAutoScale)
+  const height = width * (size.height / size.width)
   const limit = Math.min(viewportHeight * 7 / 10, 600) / displayScale
   if (!positive(height) || !positive(limit)) return null
-  return { width: availableWidth, height, limit, overflows: height > limit + 1 / displayScale }
-}
-
-function absoluteLength(value: string | null): number {
-  if (!value || !/^\s*\d+(?:\.\d+)?(?:px)?\s*$/i.test(value)) return 0
-  return Number.parseFloat(value)
-}
-
-function svgSize(svg: SVGSVGElement): DiagramSize | null {
-  const parts = (svg.getAttribute('viewBox') || '').trim().split(/[\s,]+/).map(Number)
-  if (parts.length === 4 && parts.every(Number.isFinite) && positive(parts[2]) && positive(parts[3])) {
-    return { width: parts[2], height: parts[3] }
-  }
-  const width = absoluteLength(svg.getAttribute('width')) || absoluteLength(svg.style.width)
-  const height = absoluteLength(svg.getAttribute('height')) || absoluteLength(svg.style.height)
-  return positive(width) && positive(height) ? { width, height } : null
+  return { width, height, limit, overflows: height > limit + 1 / displayScale }
 }
 
 function sizeOf(state: DiagramState): DiagramSize | null {
   if (state.failed) return null
-  if (state.media instanceof SVGSVGElement) return svgSize(state.media)
+  if (state.media instanceof SVGSVGElement) return state.metrics
   const img = state.media
   // Lazy/loading/error images must not be collapsed using stale attributes or a browser placeholder.
   if (!img.complete || !positive(img.naturalWidth) || !positive(img.naturalHeight)) return null
-  return { width: img.naturalWidth, height: img.naturalHeight }
+  return state.source === 'plantuml' && state.metrics
+    ? state.metrics : { width: img.naturalWidth, height: img.naturalHeight }
 }
 
 function restoreAttribute(element: Element, name: string, value: string | null): void {
@@ -113,7 +104,7 @@ function restoreMedia(state: DiagramState): void {
   state.styled = false
 }
 
-function fillMedia(state: DiagramState, size: DiagramSize): void {
+function fillMedia(state: DiagramState, size: DiagramSize, layout: InlineDiagramLayout): void {
   const media = state.media
   if (media instanceof SVGSVGElement) {
     const parts = (media.getAttribute('viewBox') || '').trim().split(/[\s,]+/).map(Number)
@@ -129,9 +120,9 @@ function fillMedia(state: DiagramState, size: DiagramSize): void {
   // never nested icons/text, and keep the original markup for full-screen size inference.
   // Use CSSOM's serialized zero lengths so an unchanged layout does not rewrite these styles.
   const sizing: Record<string, string> = {
-    display: 'block', width: '100%', height: 'auto',
+    display: 'block', width: `${layout.width}px`, height: `${layout.height}px`,
     'max-width': 'none', 'max-height': 'none', 'min-width': '0px', 'min-height': '0px',
-    'aspect-ratio': `${size.width} / ${size.height}`, margin: '0px', 'object-fit': 'contain',
+    'aspect-ratio': `${size.width} / ${size.height}`, margin: '0px auto', 'object-fit': 'contain',
   }
   for (const [name, value] of Object.entries(sizing)) {
     if (media.style.getPropertyValue(name) !== value || media.style.getPropertyPriority(name) !== 'important') {
@@ -153,7 +144,7 @@ export function attachInlineDiagrams(
   const states = new Map<HTMLElement, DiagramState>()
   const doc = root.ownerDocument
   root.querySelectorAll<HTMLElement>(
-    '.media-frame[data-media-kind="plantuml"], .media-frame[data-media-kind="mermaid"]',
+    '.media-frame[data-media-kind="plantuml"], .media-frame[data-media-kind="mermaid"], .media-frame[data-media-kind="image"]',
   ).forEach((frame) => {
     const media = Array.from(frame.querySelectorAll<SVGSVGElement | HTMLImageElement>('svg, img'))
       .find((node) => !node.closest('button') && !node.parentElement?.closest('svg'))
@@ -163,6 +154,10 @@ export function attachInlineDiagrams(
     if (content.parentElement !== frame) return
 
     const payload = originalPayload(media)
+    const source = frame.dataset.mediaKind as MediaSource
+    const metrics = media instanceof SVGSVGElement
+      ? measureDiagramSvg(payload?.svg ?? media.outerHTML) ?? svgSize(media) : null
+    if (payload && metrics) payload.diagramMetrics = metrics
     const viewport = doc.createElement('div')
     viewport.className = 'inline-diagram-viewport'
     viewport.id = `inline-diagram-${++viewportId}`
@@ -178,7 +173,7 @@ export function attachInlineDiagrams(
     frame.appendChild(toggle)
     frame.classList.add('inline-diagram')
     const state: DiagramState = {
-      frame, media, content, viewport, toggle, payload,
+      frame, media, content, viewport, toggle, payload, metrics, source,
       originalStyle: media.getAttribute('style'),
       originalViewBox: media.getAttribute('viewBox'),
       originalAspect: media.getAttribute('preserveAspectRatio'),
@@ -196,6 +191,14 @@ export function attachInlineDiagrams(
       }
     }
     states.set(frame, state)
+    if (source === 'plantuml' && payload?.src) {
+      void loadPlantUmlMetrics(media instanceof HTMLImageElement ? media.src : payload.src).then(metrics => {
+        if (disposed || !states.has(frame)) return
+        state.metrics = metrics
+        if (state.payload && metrics) state.payload.diagramMetrics = metrics
+        scheduleRefresh()
+      })
+    }
   })
 
   function cancelScheduledRefresh() {
@@ -220,12 +223,13 @@ export function attachInlineDiagrams(
     cancelScheduledRefresh()
     for (const state of states.values()) {
       const size = sizeOf(state)
-      if (size) fillMedia(state, size)
-      else restoreMedia(state)
       const width = state.viewport.clientWidth
       const screenWidth = state.viewport.getBoundingClientRect().width
       const scale = positive(screenWidth) && positive(width) ? screenWidth / width : 1
-      state.layout = size ? inlineDiagramLayout(size, width, scrollContainer.clientHeight, scale) : null
+      state.layout = size ? inlineDiagramLayout(size, width, scrollContainer.clientHeight, scale,
+        autoScaleLimit(state.source, state.metrics, parseFloat(getComputedStyle(root).fontSize) || 16)) : null
+      if (size && state.layout) fillMedia(state, size, state.layout)
+      else restoreMedia(state)
       const overflows = state.layout?.overflows ?? false
       const collapsed = overflows && !state.expanded
       const expanded = overflows && state.expanded
@@ -235,7 +239,8 @@ export function attachInlineDiagrams(
       if (state.frame.classList.contains('is-collapsed') !== collapsed) state.frame.classList.toggle('is-collapsed', collapsed)
       if (state.frame.classList.contains('is-expanded') !== expanded) state.frame.classList.toggle('is-expanded', expanded)
       if (state.toggle.hidden !== !overflows) state.toggle.hidden = !overflows
-      const text = state.expanded ? '收起图表' : '展开完整图表'
+      const noun = state.source === 'image' ? '图片' : '图表'
+      const text = state.expanded ? `收起${noun}` : `展开完整${noun}`
       if (state.toggle.textContent !== text) state.toggle.textContent = text
       const ariaExpanded = String(state.expanded)
       if (state.toggle.getAttribute('aria-expanded') !== ariaExpanded) state.toggle.setAttribute('aria-expanded', ariaExpanded)
@@ -262,8 +267,8 @@ export function attachInlineDiagrams(
       const visibleTop = scrollContainer.getBoundingClientRect().top + scrollContainer.clientTop
       const frameTop = state.frame.getBoundingClientRect().top
       const clipRect = state.viewport.getBoundingClientRect()
-      const scale = positive(clipRect.width) && positive(state.layout.width)
-        ? clipRect.width / state.layout.width : 1
+      const scale = positive(clipRect.width) && positive(state.viewport.clientWidth)
+        ? clipRect.width / state.viewport.clientWidth : 1
       const readingPastClip = state.expanded && clipRect.top + state.layout.limit * scale <= visibleTop
       state.expanded = !state.expanded
       refresh()

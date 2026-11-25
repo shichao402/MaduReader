@@ -62,6 +62,7 @@ type Draft = Pick<
   Settings,
   | 'theme'
   | 'fontSize'
+  | 'pageWidth'
   | 'zoom'
   | 'codeHighlightTheme'
   | 'showLineNumbers'
@@ -70,6 +71,8 @@ type Draft = Pick<
   | 'inactiveRetentionDays'
   | 'openFilesSort'
   | 'closeToTray'
+  | 'closePreviewOnBlankDoubleClick'
+  | 'previewModifierWheelPan'
   | 'mermaidConfig'
   | 'plantUmlServer'
   | 'proxyEnabled'
@@ -193,7 +196,7 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
       reader.onload = (ev) => {
         try {
           const data = JSON.parse(ev.target?.result as string)
-          commit(data)
+          commit({ ...data, pageWidth: data.pageWidth ?? DEFAULT_SETTINGS.pageWidth })
           alert('设置导入成功')
         } catch {
           alert('导入失败：文件格式不正确')
@@ -207,6 +210,7 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
   const draft: Draft = {
     theme: s.theme,
     fontSize: s.fontSize,
+    pageWidth: s.pageWidth,
     zoom: s.zoom,
     codeHighlightTheme: s.codeHighlightTheme,
     showLineNumbers: s.showLineNumbers,
@@ -215,6 +219,8 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
     inactiveRetentionDays: s.inactiveRetentionDays,
     openFilesSort: s.openFilesSort,
     closeToTray: s.closeToTray,
+    closePreviewOnBlankDoubleClick: s.closePreviewOnBlankDoubleClick,
+    previewModifierWheelPan: s.previewModifierWheelPan,
     mermaidConfig: s.mermaidConfig,
     plantUmlServer: s.plantUmlServer,
     proxyEnabled: s.proxyEnabled,
@@ -352,6 +358,36 @@ export default function SettingsDialog({ open, onOpenChange }: SettingsDialogPro
                 />
                 显示代码行号
               </label>
+            </div>
+
+            <div className={section}>
+              <h3 className={sectionTitle}>图片预览</h3>
+              <label className="flex items-center gap-2 cursor-pointer text-sm">
+                <input
+                  id="close-preview-on-blank-double-click"
+                  type="checkbox"
+                  checked={draft.closePreviewOnBlankDoubleClick}
+                  onChange={(e) => commit({ closePreviewOnBlankDoubleClick: e.target.checked })}
+                  aria-describedby="close-preview-on-blank-double-click-hint"
+                />
+                双击空白处关闭图片预览
+              </label>
+              <p id="close-preview-on-blank-double-click-hint" className="mt-1 text-xs text-[color:var(--color-text-secondary)]">
+                开启后，双击全屏预览中图片或图表外围的空白即可关闭；双击内容和工具栏不会关闭。
+              </p>
+              <label className="flex items-center gap-2 cursor-pointer text-sm mt-3">
+                <input
+                  id="preview-modifier-wheel-pan"
+                  type="checkbox"
+                  checked={draft.previewModifierWheelPan}
+                  onChange={(e) => commit({ previewModifierWheelPan: e.target.checked })}
+                  aria-describedby="preview-modifier-wheel-pan-hint"
+                />
+                Ctrl / Shift + 滚轮平移图片预览
+              </label>
+              <p id="preview-modifier-wheel-pan-hint" className="mt-1 text-xs text-[color:var(--color-text-secondary)]">
+                开启后，Ctrl + 滚轮上下滚动，Shift + 滚轮左右滚动；普通滚轮仍用于缩放。
+              </p>
             </div>
 
             <div className={section}>

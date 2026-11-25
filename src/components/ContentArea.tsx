@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { useLayoutEffect, useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { Folder, FolderOpen, ZoomIn, ZoomOut, Search, Download, Presentation, Sun, Moon, Settings, BookOpen, Command } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { getTabStore, getSettingsStore, useStores } from '../hooks/useStores'
@@ -13,6 +13,7 @@ import MediaLightbox from './MediaLightbox'
 import ExternalChangeBanner from './ExternalChangeBanner'
 import { cn } from '../lib/utils'
 import { openUserPaths } from '../lib/openPaths'
+import { attachReadingColumn, type ReadingColumnController } from '../lib/readingColumn'
 import { useReadingPosition } from '../hooks/useReadingPosition'
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
@@ -54,6 +55,9 @@ export default function ContentArea({
   const containerRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const surfaceRef = useRef<HTMLDivElement>(null)
+  const columnRef = useRef<HTMLDivElement>(null)
+  const columnControllerRef = useRef<ReadingColumnController | null>(null)
   const inlineDiagramsRef = useRef<InlineDiagramsController | null>(null)
   const [rendered, setRendered] = useState({ html: '', tabId: '', path: '', source: '' })
   const renderedContent = rendered.html
@@ -128,6 +132,27 @@ export default function ContentArea({
 
   useReadingPosition(scrollRef, contentRef, rendered.path, rendered.source, rendered, ready && !slideMode)
 
+  const columnOptions = () => {
+    // Media listeners survive zoom changes. Read the live store instead of a render's zoom.
+    const current = getSettingsStore()
+    return {
+      width: current.settings.pageWidth ?? 800, zoom: (current.currentZoom ?? 100) / 100, source: rendered.source,
+      loaded: current.isLoaded === true,
+      onWidth: (width: number) => current.setPageWidth(width),
+      onFlush: () => { void current.flushPageWidth() },
+      onLayout: () => inlineDiagramsRef.current?.refresh(),
+    }
+  }
+  useLayoutEffect(() => {
+    if (!ready || isEmpty || slideMode || !surfaceRef.current || !scrollRef.current || !columnRef.current || !contentRef.current) return
+    const controller = attachReadingColumn(surfaceRef.current, scrollRef.current, columnRef.current, contentRef.current, columnOptions())
+    columnControllerRef.current = controller
+    return () => { controller.dispose(); columnControllerRef.current = null }
+  }, [rendered, ready, isEmpty, slideMode])
+  useLayoutEffect(() => {
+    columnControllerRef.current?.update(columnOptions())
+  }, [settingsStore.settings.pageWidth, settingsStore.isLoaded, settingsStore.settings.fontSize, zoom])
+
   // 渲染完成后绑定正文图表和链接；折叠按钮必须先于全屏载荷在捕获阶段处理。
   useEffect(() => {
     if (!contentRef.current || !scrollRef.current) return
@@ -137,7 +162,10 @@ export default function ContentArea({
     detachLinkHandler(el)
     attachLinkHandler(el)
     const onMediaClick = (event: Event) => {
-      if (diagrams.handleToggle(event)) return
+      if (diagrams.handleToggle(event)) {
+        columnControllerRef.current?.update(columnOptions())
+        return
+      }
       const payload = diagrams.payloadFromTarget(event.target) ?? mediaPayloadFromEventTarget(event.target)
       if (!payload) return
       event.preventDefault()
@@ -170,11 +198,11 @@ export default function ContentArea({
   // 缩放不重建正文图表；transform 不触发 ResizeObserver，显式重测可视高度。
   useEffect(() => {
     if (contentRef.current) {
-      contentRef.current.style.transform = `scale(${zoom})`
+      if (slideMode) contentRef.current.style.transform = `scale(${zoom})`
       contentRef.current.style.transformOrigin = 'top left'
       inlineDiagramsRef.current?.refresh()
     }
-  }, [zoom, rendered, isEmpty, ready])
+  }, [zoom, rendered, isEmpty, ready, slideMode, settingsStore.settings.fontSize])
 
   // 快捷键
   useEffect(() => {
@@ -462,17 +490,23 @@ export default function ContentArea({
       ) : !ready ? (
         <div role="status" className="flex-1 flex items-center justify-center text-sm text-[color:var(--color-text-secondary)]">正在加载文档…</div>
       ) : (
-        <div key={rendered.tabId} ref={scrollRef} data-reading-path={rendered.path} style={{ overflowAnchor: 'none' }} className="flex-1 overflow-auto p-8 px-12">
+        <div key={rendered.tabId} ref={surfaceRef} className="reading-surface">
+        <div ref={scrollRef} data-reading-path={rendered.path} style={{ overflowAnchor: 'none' }} className="reading-scroll overflow-auto p-8 px-12">
+          <div ref={columnRef} className={slideMode ? '' : 'reading-column animate-fade-in'}>
           <div
             ref={contentRef}
             className={cn(
-              'markdown-content max-w-[800px] mx-auto animate-fade-in',
+              'markdown-content',
+              !slideMode && 'reading-column-content',
+              slideMode && 'max-w-[800px] mx-auto',
               slideMode &&
                 'min-h-[calc(100vh-180px)] p-12 border border-[color:var(--color-border-base)] rounded-2xl shadow-lg bg-[color:var(--color-content)]',
             )}
-            style={{ fontSize: `${settingsStore.settings?.fontSize ?? 16}px`, transform: `scale(${zoom})`, transformOrigin: 'top left' }}
+            style={{ fontSize: `${settingsStore.settings?.fontSize ?? 16}px`, ...(slideMode ? { transform: `scale(${zoom})` } : {}), transformOrigin: 'top left' }}
             dangerouslySetInnerHTML={{ __html: renderedContent }}
           />
+          </div>
+        </div>
         </div>
       )}
 

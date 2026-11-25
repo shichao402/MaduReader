@@ -69,10 +69,10 @@ export function captureReadingPosition(scroll: HTMLElement, root: HTMLElement, s
 }
 
 /** 首次打开必须是 0；原内容用像素位置，编辑后优先定位仍存在的段落，否则按进度安全夹取。 */
-export function readingPositionTop(scroll: HTMLElement, root: HTMLElement, signature: string, saved?: ReadingPosition): number {
+export function readingPositionTop(scroll: HTMLElement, root: HTMLElement, signature: string, saved?: ReadingPosition, forceAnchor = false): number {
   if (!saved || saved.top === 0) return 0
   const max = maxScrollTop(scroll)
-  if (saved.signature === signature) return Math.max(0, Math.min(saved.top, max))
+  if (!forceAnchor && saved.signature === signature) return Math.max(0, Math.min(saved.top, max))
   const edge = scroll.getBoundingClientRect().top + scroll.clientTop
   const candidates = blocks(root).map((el, index) => ({ el, index })).filter(({ el }) => textOf(el) === saved.anchorText)
   candidates.sort((a, b) => Math.abs(a.index - saved.anchorIndex) - Math.abs(b.index - saved.anchorIndex))

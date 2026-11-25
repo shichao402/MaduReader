@@ -44,6 +44,18 @@ describe('reading position correction', () => {
     max = 0
     expect(readingPositionTop(scroll, root, contentSignature('old'), position())).toBe(0)
   })
+  it('same content width reflow explicitly restores its block, not old pixel top', () => {
+    expect(readingPositionTop(scroll, root, contentSignature('old'), position(), true)).toBe(310)
+  })
+  it('width reflow ends opening restoration so a delayed image cannot restore stale pixels', () => {
+    const image = document.createElement('img'); root.append(image)
+    Object.defineProperty(image, 'complete', { get: () => false })
+    const dispose = attachReadingPosition(scroll, root, 'old', position(), vi.fn())
+    scroll.dispatchEvent(new Event('madu:reading-reflow'))
+    scroll.scrollTop = 310
+    image.dispatchEvent(new Event('load')); paint()
+    expect(scroll.scrollTop).toBe(310); dispose()
+  })
   it('edited content relocates the retained paragraph instead of unrelated pixels', () => {
     expect(readingPositionTop(scroll, root, contentSignature('new'), position())).toBe(310)
   })

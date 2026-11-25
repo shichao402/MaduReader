@@ -560,7 +560,7 @@ body {
   max-width: none;
 }
 
-/* Only PlantUML/Mermaid receive this class. Ordinary photos/icons keep intrinsic sizing. */
+/* All document media share width adaptation and long-media folding. */
 .markdown-content .media-frame.inline-diagram {
   width: 100%;
   max-width: 100%;
@@ -779,3 +779,16 @@ body {
   justify-content: center;
   color: var(--color-text-secondary);
 }
+
+/* A visual-width column outside the scaled Markdown layout. */
+.reading-surface { position: relative; display: flex; flex: 1; min-height: 0; min-width: 0; }
+.reading-scroll { flex: 1; min-width: 0; min-height: 0; }
+/* Clip only the pre-transform layout box; all wide document blocks scroll internally. */
+.reading-column { position: relative; margin: 0 auto; overflow: clip; }
+.reading-column-content { overflow-wrap: anywhere; }
+.reading-column-content table { display: block; overflow-x: auto; overflow-wrap: normal; }
+.reading-column-content { position: absolute; left: 0; top: 0; display: flow-root; max-width: none; }
+.reading-column-handle { position: absolute; z-index: 15; width: 6px; cursor: col-resize; outline: none; touch-action: none; }
+.reading-column-handle[hidden] { display: none; }
+.reading-column-handle > span { position: absolute; top: 0; bottom: 0; left: 1.5px; width: 3px; background: var(--color-accent); opacity: 0; }
+.reading-column-handle:hover > span, .reading-column-handle:focus-visible > span, .reading-column-handle.is-dragging > span { opacity: 1; }

@@ -53,6 +53,8 @@ export function attachReadingPosition(
   for (const event of ['wheel', 'touchstart', 'pointerdown', 'keydown']) scroll.addEventListener(event, intent, { passive: true })
   root.addEventListener('load', schedule, true)
   root.addEventListener('error', schedule, true)
+  // A width reflow restores the current block, not this opening session's old pixel top.
+  scroll.addEventListener('madu:reading-reflow', intent)
   window.addEventListener('scroll-to-heading', intent)
   window.addEventListener('trigger-find', intent)
   const beforeChange = () => { if (!restoring) save() }
@@ -70,6 +72,7 @@ export function attachReadingPosition(
     for (const event of ['wheel', 'touchstart', 'pointerdown', 'keydown']) scroll.removeEventListener(event, intent)
     root.removeEventListener('load', schedule, true)
     root.removeEventListener('error', schedule, true)
+    scroll.removeEventListener('madu:reading-reflow', intent)
     window.removeEventListener('scroll-to-heading', intent)
     window.removeEventListener('trigger-find', intent)
     window.removeEventListener('madu:before-document-change', beforeChange)

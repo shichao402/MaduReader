@@ -61,7 +61,7 @@ function flushAnimationFrame() {
 }
 
 function svg(w = 200, h = 100, extras = '') {
-  return `<svg class="mermaid-svg" viewBox="0 0 ${w} ${h}" ${extras}><rect width="${w}" height="${h}"/></svg>`
+  return `<svg class="mermaid-svg" viewBox="0 0 ${w} ${h}" ${extras}><rect width="${w}" height="${h}"/><text font-size="1">geometry fixture</text></svg>`
 }
 function rect(top: number, w: number, h: number): DOMRect {
   return { top, bottom: top + h, left: 0, right: w, width: w, height: h, x: 0, y: top, toJSON: () => ({}) }
@@ -132,12 +132,13 @@ beforeEach(() => {
   app.attachLinks.mockClear(); app.detachLinks.mockClear()
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('ResizeObserver', TestResizeObserver)
+  vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('no network in layout tests')))
   vi.stubGlobal('requestAnimationFrame', requestFrame)
   vi.stubGlobal('cancelAnimationFrame', cancelFrame)
   originalScrollTo = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollTo')
   Object.defineProperty(HTMLElement.prototype, 'scrollTo', { value: scrollTo, configurable: true })
   vi.spyOn(Element.prototype, 'clientWidth', 'get').mockImplementation(function (this: Element) {
-    return this.matches('.markdown-content, .inline-diagram-viewport, .media-frame') ? width : 0
+    return this.matches('.markdown-content, .inline-diagram-viewport, .media-frame, .overflow-auto') ? width : 0
   })
   vi.spyOn(Element.prototype, 'clientHeight', 'get').mockImplementation(function (this: Element) {
     return this.matches('.diagram-scroll, .overflow-auto') ? viewportHeight : 0
@@ -186,9 +187,9 @@ describe('inlineDiagramLayout', () => {
 describe('ResizeObserver frame scheduling', () => {
   function diagram(kind: string) {
     const f = fixture(kind === 'plantuml'
-      ? '<figure class="plantuml-diagram"><img src="/svg/encoded"></figure>' : svg(100, 100))
+      ? '<figure class="plantuml-diagram"><img src="/svg/encoded"></figure>' : svg(100, 300))
     const img = f.root.querySelector('img')
-    if (img) imageState(img, 100, 100)
+    if (img) imageState(img, 100, 800)
     return { ...f, controller: enhance(f.root, f.scroll) }
   }
   function watchDom(root: Element) {
@@ -220,13 +221,13 @@ describe('ResizeObserver frame scheduling', () => {
     // Change again without another notification: measurements must happen at frame execution.
     width = 200; viewportHeight = 1000; displayScale = 2
     if (p.media instanceof HTMLImageElement) imageState(p.media, 200, 400)
-    else p.media.setAttribute('viewBox', '0 0 200 400')
+    else p.media.setAttribute('viewBox', '0 0 200 400') // Raw metrics remain the original renderer output.
     mutation.takeRecords()
     flushAnimationFrame()
     expect(measure).toHaveBeenCalledTimes(1)
     expect(measureWidth).toHaveBeenCalledTimes(1)
     expect(measureHeight).toHaveBeenCalledTimes(1)
-    expect(p.media.style.aspectRatio).toBe('200 / 400')
+    expect(p.media.style.aspectRatio).toBe(kind === 'plantuml' ? '200 / 400' : '100 / 300')
     expect(p.clip.style.maxHeight).toBe('300px')
     expect(p.toggle.hidden).toBe(false)
     expect(mutation.takeRecords().length).toBeGreaterThan(0)
@@ -308,7 +309,7 @@ describe('ResizeObserver frame scheduling', () => {
   it('dispose 取消排队帧，迟到回调/事件/refresh 不读写 DOM，重绑也不受旧帧影响', () => {
     const f = fixture('<figure class="plantuml-diagram"><img src="/svg/encoded" style="width:100px"></figure>')
     const img = f.root.querySelector('img')!
-    imageState(img, 100, 300)
+    imageState(img, 100, 800)
     const original = f.root.innerHTML
     const controller = enhance(f.root, f.scroll)
     const measure = vi.spyOn(parts(f.root).clip, 'getBoundingClientRect').mockClear()
@@ -341,16 +342,17 @@ describe('ResizeObserver frame scheduling', () => {
 })
 
 describe('sizing, loading and payloads', () => {
-  it('只增强标记的正文图表，照片、图标、公式及全屏按钮图标不被改尺寸', () => {
+  it('普通正文图片也进入控制器，但公式及全屏按钮图标不被改尺寸', () => {
     const f = fixture(`${svg()}<figure class="plantuml-diagram"><img src="diagram.svg"></figure>
       <img src="photo.png" width="100"><img src="icon.svg" width="16"><svg class="katex-svg" viewBox="0 0 10 10"/>`)
     const ordinary = Array.from(f.root.querySelectorAll('[data-media-kind="image"], .katex-svg')).map((n) => n.outerHTML)
     enhance(f.root, f.scroll)
-    expect(f.root.querySelectorAll('.inline-diagram')).toHaveLength(2)
-    expect(Array.from(f.root.querySelectorAll('[data-media-kind="image"], .katex-svg')).map((n) => n.outerHTML)).toEqual(ordinary)
+    expect(f.root.querySelectorAll('.inline-diagram')).toHaveLength(4)
+    expect(f.root.querySelectorAll('[data-media-kind="image"].inline-diagram')).toHaveLength(2)
+    expect(f.root.querySelector('.katex-svg')?.outerHTML).toBe(ordinary.at(-1))
     expect(parts(f.root).fullscreen.querySelector('svg')!.getAttribute('width')).toBe('14')
     expect(parts(f.root).fullscreen.querySelector('svg')!.getAttribute('style')).toBeNull()
-    expect(parts(f.root).media.style.width).toBe('100%')
+    expect(parts(f.root).media.style.width).toBe('800px')
     expect(parts(f.root).toggle.hidden).toBe(true)
   })
   it('消除 Mermaid inline max-width !important，保留 viewBox/原始尺寸和完整全屏载荷', () => {
@@ -360,7 +362,7 @@ describe('sizing, loading and payloads', () => {
     const p = parts(f.root)
     expect(p.media.style.maxWidth).toBe('none')
     expect(p.media.style.getPropertyPriority('max-width')).toBe('important')
-    expect(p.media.style.height).toBe('auto')
+    expect(p.media.style.height).toBe('400px')
     expect(p.media.style.aspectRatio).toBe('200 / 100')
     expect(p.media.getAttribute('viewBox')).toBe('0 0 200 100')
     expect(p.media.getAttribute('width')).toBe('200')
@@ -370,7 +372,7 @@ describe('sizing, loading and payloads', () => {
   })
   it.each(['width="100" height="300"', 'width="100px" height="300px"', 'style="width:100px;height:300px;max-width:100px"'])(
     '无 viewBox 但有绝对尺寸 %s 的 SVG 也能等比例放大，载荷仍按原始尺寸推断', (attributes) => {
-      const f = mounted(`<svg class="mermaid-svg" ${attributes}><rect/></svg>`)
+      const f = mounted(`<svg class="mermaid-svg" ${attributes}><rect/><text font-size="1">label</text></svg>`)
       const p = parts(f.root)
       expect(p.media.getAttribute('viewBox')).toBe('0 0 100 300')
       expect(p.toggle.hidden).toBe(false)
@@ -380,7 +382,7 @@ describe('sizing, loading and payloads', () => {
   )
   it.each(['', 'width="100%" height="100%"', 'viewBox="0 0 0 0"', 'viewBox="0 0 Infinity 100"'])(
     'SVG 缺少可靠尺寸 %s 不折叠或猜测默认比例', (attributes) => {
-      const f = mounted(`<svg class="mermaid-svg" ${attributes}><rect/></svg>`)
+      const f = mounted(`<svg class="mermaid-svg" ${attributes}><rect/><text font-size="1">label</text></svg>`)
       expect(parts(f.root).toggle.hidden).toBe(true)
       expect(parts(f.root).clip.style.maxHeight).toBe('')
       expect(parts(f.root).media.getAttribute('style')).toBeNull()
@@ -390,14 +392,14 @@ describe('sizing, loading and payloads', () => {
   it('lazy 图等待 load 后用 natural 尺寸测量，error 清除折叠，重新加载可以恢复', () => {
     const f = fixture('<figure class="plantuml-diagram"><img src="/svg/encoded" loading="lazy" width="100" height="300"></figure>')
     const img = f.root.querySelector('img')!
-    imageState(img, 100, 300, false)
+    imageState(img, 100, 800, false)
     const original = img.getAttribute('style')
     const controller = enhance(f.root, f.scroll)
     expect(parts(f.root).toggle.hidden).toBe(true)
-    imageState(img, 100, 300)
+    imageState(img, 100, 800)
     img.dispatchEvent(new Event('load'))
     expect(parts(f.root).clip.style.maxHeight).toBe('490px')
-    expect(img.style.width).toBe('100%')
+    expect(img.style.width).toBe('100px')
     expect(controller.payloadFromTarget(parts(f.root).fullscreen)).toMatchObject({ src: '/svg/encoded', allowUpscale: true })
     img.dispatchEvent(new Event('error'))
     expect(parts(f.root).toggle.hidden).toBe(true)
@@ -412,7 +414,7 @@ describe('sizing, loading and payloads', () => {
   it('缓存已加载图片首次即可测量；零 natural 尺寸不会折叠', () => {
     const f = fixture('<figure class="plantuml-diagram"><img src="diagram.svg"></figure>')
     const img = f.root.querySelector('img')!
-    imageState(img, 100, 300)
+    imageState(img, 100, 800)
     enhance(f.root, f.scroll)
     expect(parts(f.root).toggle.hidden).toBe(false)
     imageState(img, 0, 0)
@@ -529,7 +531,7 @@ describe('collapse, resize and events', () => {
   })
   it('多个图表独立展开，关联 ID 不重复，链接中的 PlantUML 原始地址不变', () => {
     const f = fixture(`${svg(100, 300)}<figure class="plantuml-diagram"><a href="original"><img src="diagram.svg"></a></figure>`)
-    imageState(f.root.querySelector('img')!, 100, 300)
+    imageState(f.root.querySelector('img')!, 100, 800)
     const controller = enhance(f.root, f.scroll)
     const first = parts(f.root), second = parts(f.root, 1)
     expect(first.clip.id).not.toBe(second.clip.id)
@@ -545,7 +547,7 @@ describe('lifecycle and themed styles', () => {
   it('重复绑定复用控制器、包装、observer 和 load/error/resize 监听；清理幂等且还原原始 DOM', () => {
     const f = fixture(`${svg(200, 100, 'style="max-width:200px"')}<figure class="plantuml-diagram"><img src="diagram.svg"></figure>`)
     const img = f.root.querySelector('img')!
-    imageState(img, 100, 300)
+    imageState(img, 100, 800)
     const original = f.root.innerHTML
     const add = vi.spyOn(img, 'addEventListener'), remove = vi.spyOn(img, 'removeEventListener')
     const winAdd = vi.spyOn(window, 'addEventListener'), winRemove = vi.spyOn(window, 'removeEventListener')
@@ -570,7 +572,7 @@ describe('lifecycle and themed styles', () => {
   })
   it('没有正文图表不创建 observer/resize 监听；缺少 ResizeObserver 时 window resize 仍可用', () => {
     const winAdd = vi.spyOn(window, 'addEventListener')
-    mounted('<img src="photo.png"><span class="media-frame" data-media-kind="mermaid"><button><svg/></button></span>')
+    mounted('<span class="media-frame" data-media-kind="mermaid"><button><svg/></button></span>')
     expect(observers).toHaveLength(0)
     expect(winAdd.mock.calls.filter(([name]) => name === 'resize')).toHaveLength(0)
     vi.stubGlobal('ResizeObserver', undefined)
@@ -588,6 +590,8 @@ describe('lifecycle and themed styles', () => {
     expect(css).toMatch(/\.inline-diagram-toggle\[hidden\]\s*\{\s*display: none;/)
     expect(css).toMatch(/\.media-frame\.inline-diagram\s*\{\s*width: 100%;/)
     expect(css).not.toMatch(/\.markdown-content \.media-frame\s*\{[^}]*\n\s*width: 100%;/)
+    expect(css).toMatch(/\.reading-column-content table\s*\{[^}]*overflow-x: auto;[^}]*overflow-wrap: normal;/)
+    expect(css).toMatch(/\.katex-block\s*\{[^}]*overflow-x: auto;/)
   })
 })
 
@@ -637,7 +641,7 @@ describe('ContentArea integration', () => {
     root = await render(true)
     expect(oldFrame.querySelector('.inline-diagram-viewport')).toBeNull()
     expect(parts(root).toggle.hidden).toBe(true)
-    expect(observers.filter((o) => !o.disconnect.mock.calls.length)).toHaveLength(1)
+    expect(observers.filter((o) => !o.disconnect.mock.calls.length)).toHaveLength(2) // column + media, no leaked observers
     act(() => reactRoot!.unmount()); reactRoot = null
     expect(observers.every((o) => o.disconnect.mock.calls.length === 1)).toBe(true)
     expect(app.detachLinks).toHaveBeenCalledWith(root)
@@ -651,6 +655,14 @@ describe('ContentArea integration', () => {
     expect(root.style.transform).toBe('scale(2)')
     expect(parts(root).clip.style.maxHeight).toBe('')
     expect(parts(root).toggle.textContent).toBe('收起图表')
+    expect(observers).toHaveLength(count)
+    // The capture listener was installed before zoom changed. It must read the live zoom.
+    act(() => parts(root).toggle.click())
+    expect(root.style.transform).toBe('scale(2)')
+    expect(parts(root).clip.style.maxHeight).toBe('245px')
+    act(() => parts(root).toggle.click())
+    expect(root.style.transform).toBe('scale(2)')
+    expect(parts(root).clip.style.maxHeight).toBe('')
     expect(observers).toHaveLength(count)
   })
 })

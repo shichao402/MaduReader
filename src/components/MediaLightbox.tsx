@@ -1,8 +1,10 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { X, ZoomIn, ZoomOut } from 'lucide-react'
+import { settingsStore } from '../stores/settings'
+import { autoScaleLimit, measureDiagramSvg, loadPlantUmlMetrics } from '../lib/diagramMetrics'
 import {
-  canUpscaleMedia,
+  mediaSource,
   fitTransform,
   panBy,
   prepareSvgMarkup,
@@ -28,12 +30,28 @@ export default function MediaLightbox(props: MediaLightboxProps) {
 }
 
 function MediaLightboxView({ payload, onClose }: MediaLightboxProps) {
+  useSyncExternalStore(settingsStore.subscribe, () => settingsStore.version)
+  const closeOnBlankDoubleClick = settingsStore.settings.closePreviewOnBlankDoubleClick === true
+  const modifierWheelPan = settingsStore.settings.previewModifierWheelPan === true
   const prepared = useMemo(
     () => (payload.kind === 'svg' && payload.svg ? prepareSvgMarkup(payload.svg) : null),
     [payload.kind, payload.svg],
   )
-  const allowUpscale = canUpscaleMedia(payload)
-  const diagramTheme = payload.diagramTheme
+  const source = mediaSource(payload)
+  const diagramTheme = source === 'image' ? undefined
+    : payload.diagramTheme ?? (settingsStore.isDark ? 'dark' : 'light')
+  const [metrics, setMetrics] = useState(() => payload.diagramMetrics ??
+    (source !== 'image' && payload.svg ? measureDiagramSvg(payload.svg) : null))
+  const maxAutoScale = autoScaleLimit(source, metrics, settingsStore.settings.fontSize)
+  useEffect(() => {
+    if (source !== 'plantuml' || !payload.src) return
+    let active = true
+    void loadPlantUmlMetrics(payload.src).then(value => { if (active) setMetrics(value) })
+    return () => { active = false }
+  }, [source, payload.src])
+  useEffect(() => {
+    if (payload.diagramMetrics) setMetrics(payload.diagramMetrics)
+  }, [payload.diagramMetrics])
   const rootRef = useRef<HTMLDivElement>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
@@ -48,6 +66,8 @@ function MediaLightboxView({ payload, onClose }: MediaLightboxProps) {
   )
   const [failed, setFailed] = useState(false)
   const [panning, setPanning] = useState(false)
+  const originalSize = source === 'plantuml' && natural && metrics
+    ? { w: metrics.width, h: metrics.height } : natural
 
   function commit(next: ViewTransform) {
     transformRef.current = next
@@ -68,7 +88,8 @@ function MediaLightboxView({ payload, onClose }: MediaLightboxProps) {
       size.w,
       size.h,
       48,
-      allowUpscale,
+      true,
+      maxAutoScale,
     )
     fitScaleRef.current = next.scale
     setFitScale(next.scale)
@@ -76,11 +97,11 @@ function MediaLightboxView({ payload, onClose }: MediaLightboxProps) {
   }
 
   function resetFit() {
-    if (!natural) return
+    if (!originalSize) return
     autoFitRef.current = true
     dragRef.current = null
     setPanning(false)
-    fitTo(natural)
+    fitTo(originalSize)
   }
 
   useEffect(() => {
@@ -89,9 +110,9 @@ function MediaLightboxView({ payload, onClose }: MediaLightboxProps) {
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current
-    if (!natural || !viewport) return
+    if (!originalSize || !viewport) return
     const refit = () => {
-      if (autoFitRef.current) fitTo(natural)
+      if (autoFitRef.current) fitTo(originalSize)
     }
     // 在首次可见之前完成适配；观察实际可用区域（不包含工具栏）。
     refit()
@@ -102,7 +123,7 @@ function MediaLightboxView({ payload, onClose }: MediaLightboxProps) {
       observer?.disconnect()
       window.removeEventListener('resize', refit)
     }
-  }, [natural, allowUpscale])
+  }, [natural, metrics?.width, metrics?.height, maxAutoScale])
 
   useEffect(() => {
     const root = rootRef.current
@@ -111,7 +132,24 @@ function MediaLightboxView({ payload, onClose }: MediaLightboxProps) {
     const onWheel = (event: WheelEvent) => {
       event.preventDefault()
       const baseScale = fitScaleRef.current
-      if (baseScale === null || event.deltaY === 0 || !viewport.contains(event.target as Node)) return
+      if (baseScale === null || !viewport.contains(event.target as Node)) return
+      if (modifierWheelPan && (event.ctrlKey || event.shiftKey)) {
+        // Ctrl 优先上下滚动；部分浏览器会将 Shift + 滚轮转成 deltaX。
+        const horizontal = !event.ctrlKey && event.shiftKey
+        const delta = horizontal ? event.deltaX || event.deltaY : event.deltaY
+        if (delta === 0) return
+        const unit = event.deltaMode === 1 ? 16
+          : event.deltaMode === 2 ? (horizontal ? viewport.clientWidth : viewport.clientHeight)
+          : 1
+        // 距离按屏幕像素计算，不随图片缩放变化；方向与普通滚动一致。
+        commitUserTransform(panBy(
+          transformRef.current,
+          horizontal ? -delta * unit : 0,
+          horizontal ? 0 : -delta * unit,
+        ))
+        return
+      }
+      if (event.deltaY === 0) return
       const rect = viewport.getBoundingClientRect()
       const next = zoomAtPoint(
         transformRef.current,
@@ -124,7 +162,7 @@ function MediaLightboxView({ payload, onClose }: MediaLightboxProps) {
     }
     root.addEventListener('wheel', onWheel, { passive: false })
     return () => root.removeEventListener('wheel', onWheel)
-  }, [])
+  }, [modifierWheelPan])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -153,7 +191,7 @@ function MediaLightboxView({ payload, onClose }: MediaLightboxProps) {
   }
 
   function onPointerDown(event: React.PointerEvent<HTMLDivElement>) {
-    if (event.button !== 0 || fitScaleRef.current === null) return
+    if (event.button !== 0 || event.isPrimary === false || fitScaleRef.current === null) return
     if ((event.target as Element).closest('button')) return
     event.currentTarget.setPointerCapture(event.pointerId)
     dragRef.current = {
@@ -180,8 +218,24 @@ function MediaLightboxView({ payload, onClose }: MediaLightboxProps) {
     setPanning(false)
   }
 
-  const percent = fitScale === null ? null : relativeScalePercent(transform.scale, fitScale)
+  const percent = fitScale === null ? null : relativeScalePercent(transform.scale)
   const ready = fitScale !== null && !failed
+
+  function onBlankDoubleClick(event: React.MouseEvent<HTMLDivElement>) {
+    if (!closeOnBlankDoubleClick || event.button !== 0) return
+    if (event.target instanceof Element && event.target.closest('.media-lightbox-plate')) return
+    const plate = viewportRef.current?.querySelector('.media-lightbox-plate')
+    if (ready && plate) {
+      // Pointer capture can retarget a double-click on the image to the viewport.
+      // Check the transformed content bounds as well as the event target.
+      const rect = plate.getBoundingClientRect()
+      if (event.clientX >= rect.left && event.clientX <= rect.right &&
+          event.clientY >= rect.top && event.clientY <= rect.bottom) return
+    }
+    event.preventDefault()
+    event.stopPropagation()
+    onClose()
+  }
 
   return createPortal(
     <div
@@ -193,7 +247,11 @@ function MediaLightboxView({ payload, onClose }: MediaLightboxProps) {
     >
       <div className="media-lightbox-toolbar">
         <span className="media-lightbox-title">{payload.label}</span>
-        <span className="media-lightbox-hint">滚轮缩放 · 按住拖动</span>
+        <span className="media-lightbox-hint">
+          滚轮缩放 · 按住拖动
+          {modifierWheelPan ? ' · Ctrl+滚轮上下 · Shift+滚轮左右' : ''}
+          {closeOnBlankDoubleClick ? ' · 双击空白关闭' : ''}
+        </span>
         <div className="media-lightbox-actions">
           <button type="button" disabled={!ready} onClick={() => zoomTowardCenter(1 / 1.2)} title="缩小">
             <ZoomOut size={15} />
@@ -202,8 +260,14 @@ function MediaLightboxView({ payload, onClose }: MediaLightboxProps) {
           <button
             type="button"
             disabled={!ready}
-            onClick={resetFit}
-            title="缩放比例相对适应窗口，点击重新适配并居中（100%）"
+            onClick={() => {
+              const viewport = viewportRef.current
+              if (!originalSize || !viewport) return
+              dragRef.current = null
+              setPanning(false)
+              commitUserTransform({ scale: 1, x: (viewport.clientWidth - originalSize.w) / 2, y: (viewport.clientHeight - originalSize.h) / 2 })
+            }}
+            title="相对原始尺寸，点击恢复 100% 并居中"
           >
             {percent === null ? (failed ? '未加载' : '加载中') : `${percent}%`}
           </button>
@@ -211,6 +275,7 @@ function MediaLightboxView({ payload, onClose }: MediaLightboxProps) {
             <ZoomIn size={15} />
             放大
           </button>
+          <button type="button" disabled={!ready} onClick={resetFit} title="适应窗口">适应窗口</button>
           <button ref={closeRef} type="button" onClick={onClose} title="关闭 (Esc)">
             <X size={15} />
             关闭
@@ -225,6 +290,7 @@ function MediaLightboxView({ payload, onClose }: MediaLightboxProps) {
         onPointerUp={endPan}
         onPointerCancel={endPan}
         onLostPointerCapture={endPan}
+        onDoubleClick={onBlankDoubleClick}
       >
         {failed ? (
           <p className="media-lightbox-status">图片加载失败</p>
@@ -248,7 +314,7 @@ function MediaLightboxView({ payload, onClose }: MediaLightboxProps) {
                 data-diagram-theme={diagramTheme}
                 src={payload.src}
                 alt={payload.alt || payload.label}
-                style={natural ? { width: natural.w, height: natural.h } : undefined}
+                style={originalSize ? { width: originalSize.w, height: originalSize.h } : undefined}
                 draggable={false}
                 onLoad={(event) => {
                   const img = event.currentTarget

@@ -1,3 +1,5 @@
+import { svgSize, type DiagramMetrics, type MediaSource } from './diagramMetrics'
+
 export interface ViewTransform {
   scale: number
   x: number
@@ -11,6 +13,8 @@ export interface MediaPayload {
   svg?: string
   label: string
   allowUpscale?: boolean
+  source?: MediaSource
+  diagramMetrics?: DiagramMetrics
   diagramTheme?: 'light' | 'dark'
 }
 
@@ -20,7 +24,7 @@ export interface PreparedSvg {
   height: number
 }
 
-// 交互缩放的上下限相对适配基准，不能限制超大图的首次完整适配。
+// 宽松交互边界必须覆盖适配比例与原始 100%，不限制首次完整适配。
 export const MIN_VIEW_SCALE = 0.2
 export const MAX_VIEW_SCALE = 1000
 
@@ -30,16 +34,18 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
 }
 
-export function canUpscaleMedia(payload: MediaPayload): boolean {
-  if (payload.allowUpscale !== undefined) return payload.allowUpscale
-  if (payload.kind === 'svg') return true
-  const src = payload.src || ''
-  const path = src.split(/[?#]/, 1)[0]
-  return /^data:image\/svg\+xml(?:[;,]|$)/i.test(src) || /\.svg$/i.test(path)
+export function canUpscaleMedia(_payload: MediaPayload): boolean {
+  return true
 }
 
-export function relativeScalePercent(scale: number, fitScale: number): number {
-  return Math.round((scale / fitScale) * 100)
+export function mediaSource(payload: MediaPayload): MediaSource {
+  return payload.source ?? (payload.kind === 'svg' ? 'mermaid' : 'image')
+}
+
+
+export function relativeScalePercent(scale: number, _fitScale = 1): number {
+  const percent = scale * 100
+  return percent < 1 ? Number(percent.toPrecision(3)) : Math.round(percent)
 }
 
 export function wheelZoomDelta(deltaY: number, deltaMode = 0): number {
@@ -60,8 +66,8 @@ export function zoomBy(
   }
   const nextScale = clamp(
     transform.scale * factor,
-    fitScale * MIN_VIEW_SCALE,
-    fitScale * MAX_VIEW_SCALE,
+    Math.min(fitScale * MIN_VIEW_SCALE, transform.scale, MIN_VIEW_SCALE),
+    Math.max(fitScale * MAX_VIEW_SCALE, transform.scale, MAX_VIEW_SCALE),
   )
   if (nextScale === transform.scale) return transform
   const contentX = (originX - transform.x) / transform.scale
@@ -95,13 +101,14 @@ export function fitTransform(
   contentW: number,
   contentH: number,
   padding = 48,
-  allowUpscale = false,
+  allowUpscale = true,
+  maxAutoScale = Infinity,
 ): ViewTransform {
   const availW = Math.max(1, viewportW - padding * 2)
   const availH = Math.max(1, viewportH - padding * 2)
   const fit = Math.min(availW / Math.max(contentW, 1), availH / Math.max(contentH, 1))
-  // 适配不设最小比例，否则超大图无法完整显示。位图默认不自动放大。
-  const scale = Math.min(fit, allowUpscale ? MAX_VIEW_SCALE : 1)
+  // 适配不设最小比例；所有图片允许放大，渲染图另受自动字号上限约束。
+  const scale = Math.min(fit, allowUpscale ? Infinity : 1, maxAutoScale)
   return {
     scale,
     x: (viewportW - contentW * scale) / 2,
@@ -110,22 +117,12 @@ export function fitTransform(
 }
 
 function readSvgSize(svg: Element): { width: number; height: number } {
-  const viewBox = svg.getAttribute('viewBox')
-  if (viewBox) {
-    const parts = viewBox.trim().split(/[\s,]+/).map(Number)
-    if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
-      return { width: parts[2], height: parts[3] }
-    }
-  }
-  const width = parseFloat(svg.getAttribute('width') || '')
-  const height = parseFloat(svg.getAttribute('height') || '')
-  if (width > 0 && height > 0) return { width, height }
-  return { width: 800, height: 600 }
+  return svgSize(svg) ?? { width: 800, height: 600 }
 }
 
 function namespaceSvgIds(svg: Element, prefix: string): void {
   const map = new Map<string, string>()
-  svg.querySelectorAll('[id]').forEach((el) => {
+  ;[svg, ...svg.querySelectorAll('[id]')].forEach((el) => {
     const id = el.getAttribute('id')
     if (!id) return
     const next = `${prefix}-${id}`
@@ -153,6 +150,15 @@ function namespaceSvgIds(svg: Element, prefix: string): void {
     for (const child of Array.from(el.children)) visit(child)
   }
   visit(svg)
+  // Mermaid scopes renderer CSS to its SVG root ID. Keep those selectors valid too.
+  svg.querySelectorAll('style').forEach((style) => {
+    let css = style.textContent || ''
+    for (const [id, next] of map) {
+      const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      css = css.replace(new RegExp(`#${escaped}(?![\\w-])`, 'g'), `#${next}`)
+    }
+    style.textContent = css
+  })
 }
 
 export function prepareSvgMarkup(svg: string): PreparedSvg {
@@ -236,7 +242,7 @@ function payloadFromFrame(frame: HTMLElement): MediaPayload | null {
   if (kind === 'mermaid') {
     const svg = frame.querySelector('svg')
     if (!svg) return null
-    return { kind: 'svg', svg: svg.outerHTML, label: '流程图', ...(diagramTheme ? { diagramTheme } : {}) }
+    return { kind: 'svg', source: 'mermaid', svg: svg.outerHTML, label: '流程图', ...(diagramTheme ? { diagramTheme } : {}) }
   }
   const img = frame.querySelector('img')
   const src = img?.getAttribute('src') || ''
@@ -244,6 +250,7 @@ function payloadFromFrame(frame: HTMLElement): MediaPayload | null {
   const alt = img.getAttribute('alt') || ''
   return {
     kind: 'image',
+    source: kind === 'plantuml' ? 'plantuml' : 'image',
     src,
     alt,
     label: kind === 'plantuml' ? 'PlantUML' : alt || '图片',
