@@ -49,7 +49,12 @@ function isIgnoredEvent(event: WatchEvent, root: string, windowsPath: boolean): 
  * failures use foreground 10-second polling and watch retries instead. Pending
  * startups are kept across maintenance ticks, never multiplied by periodic rebuilds.
  */
-export function startDirectorySync(path: string, refresh: () => Promise<void>): () => void {
+export function startDirectorySync(
+  path: string,
+  refresh: () => Promise<void>,
+  options: { recursive?: boolean } = {},
+): () => void {
+  const recursive = options.recursive ?? true
   const normalizedRoot = normalizePath(path)
   const windowsPath = /^[a-z]:\//i.test(normalizedRoot) || normalizedRoot.startsWith('//')
   const root = windowsPath ? normalizedRoot.toLowerCase() : normalizedRoot
@@ -160,7 +165,7 @@ export function startDirectorySync(path: string, refresh: () => Promise<void>): 
       if (!current(token)) return
       const stop = await watchImmediate(path, (event) => {
         if (current(token) && !isIgnoredEvent(event, root, windowsPath)) requestScan()
-      }, { recursive: true })
+      }, { recursive })
       if (!current(token)) {
         release(stop, 'late startup after pause/dispose/restart')
         return

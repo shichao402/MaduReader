@@ -236,11 +236,34 @@ export default function App() {
   }, [])
 
   // 所有目录入口、会话恢复共用同一监听生命周期；虚拟工作区不接触原生文件系统。
+  // 目录树刷新后再核对已打开正文：当前阅读的文件只提示变更，不直接替换。
   useEffect(() => {
     const root = tabStore.workingDirectory
     if (!isTauri || !root || tabStore.isVirtualWorkspace) return
-    return startDirectorySync(root, () => tabStore.refreshFileTree())
+    return startDirectorySync(root, async () => {
+      await tabStore.refreshFileTree()
+      await tabStore.syncOpenFileContents()
+    })
   }, [tabStore, tabStore.workingDirectory, tabStore.isVirtualWorkspace])
+
+  // 工作目录之外打开的文件（参数/文件关联/拖拽）收不到目录事件，逐个文件非递归监听。
+  const outsideFilesKey = (() => {
+    const root = tabStore.workingDirectory.replace(/\\/g, '/').replace(/\/+$/, '')
+    const rootKey = root.toLowerCase()
+    const prefix = rootKey ? `${rootKey}/` : ''
+    return tabStore.tabs
+      .filter(tab => !tab.isUntitled && tab.path)
+      .map(tab => tab.path.replace(/\\/g, '/'))
+      .filter(path => !prefix || !path.toLowerCase().startsWith(prefix))
+      .sort()
+      .join('\n')
+  })()
+  useEffect(() => {
+    if (!isTauri || !outsideFilesKey || tabStore.isVirtualWorkspace) return
+    const stops = outsideFilesKey.split('\n').map(path =>
+      startDirectorySync(path, () => tabStore.syncOpenFileContents(), { recursive: false }))
+    return () => stops.forEach(stop => stop())
+  }, [tabStore, outsideFilesKey, tabStore.isVirtualWorkspace])
 
   // 监听设置打开事件（icon bar 等触发）
   useEffect(() => {

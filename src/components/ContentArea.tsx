@@ -10,6 +10,7 @@ import { decorateViewableMedia, mediaPayloadFromEventTarget, type MediaPayload }
 import { attachInlineDiagrams, type InlineDiagramsController } from '../lib/inlineDiagrams'
 import ExportDialog from './ExportDialog'
 import MediaLightbox from './MediaLightbox'
+import ExternalChangeBanner from './ExternalChangeBanner'
 import { cn } from '../lib/utils'
 import { openUserPaths } from '../lib/openPaths'
 import { useReadingPosition } from '../hooks/useReadingPosition'
@@ -401,6 +402,15 @@ export default function ContentArea({
           <Settings size={15} />
         </button>
       </div>
+
+      {/* 外部修改提示：不自动替换正在阅读的正文 */}
+      {!isEmpty && tabStore.activeTab?.externalContent !== undefined && (
+        <ExternalChangeBanner
+          modified={tabStore.activeTab.isModified}
+          onReload={() => { const id = tabStore.activeTabId; if (id) getTabStore().reloadExternalChange(id) }}
+          onDismiss={() => { const id = tabStore.activeTabId; if (id) getTabStore().dismissExternalChange(id) }}
+        />
+      )}
 
       {/* 内容滚动区 / 空态 */}
       {isEmpty ? (

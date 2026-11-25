@@ -46,3 +46,11 @@ export async function isDirectory(path: string): Promise<boolean> {
   const fs = await fsModule()
   return (await fs.stat(path)).isDirectory
 }
+
+/** 修改时间 + 大小组成的磁盘指纹；未变化时可跳过读取正文。 */
+export async function allowAndStatFile(path: string): Promise<string> {
+  await allowPath(path)
+  const fs = await fsModule()
+  const info = await fs.stat(path)
+  return `${info.mtime ? new Date(info.mtime).getTime() : ''}:${info.size}`
+}

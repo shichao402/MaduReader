@@ -13,6 +13,8 @@ export interface Tab {
   isModified: boolean
   isUntitled: boolean
   sourceMissing?: boolean
+  /** 磁盘上检测到的新版本；正在阅读或有未保存修改时不直接替换，由用户决定是否刷新。 */
+  externalContent?: string
   lastAccessedAt?: number
   accessCount?: number
 }
@@ -134,6 +136,12 @@ class TabStore {
 
   private _tabCounter = 0
   private _virtualFiles = new Map<string, string>()
+
+  // 正文同步：串行执行，期间到达的请求合并为一次补查；指纹不随会话持久化。
+  private _diskStamps = new WeakMap<Tab, string>()
+  private _dismissedVersions = new WeakMap<Tab, string>()
+  private _contentSyncTask: Promise<void> | null = null
+  private _contentSyncAgain = false
 
   private _version = 0
   private _listeners = new Set<Listener>()
@@ -321,10 +329,11 @@ class TabStore {
       if (generation !== this._openGeneration) throw new Error('工作区已变化，请重新打开文件')
       const name = getBaseName(normalizedPath)
 
-      // 已打开的正文仍是原快照；成功读到源文件仅清除丢失标记。
+      // 已打开：非当前阅读的干净标签直接换新；正在阅读或有未保存修改的只提示有变更。
       const existingTab = this._tabs.find((t) => filePathKey(t.path) === filePathKey(normalizedPath) && !t.isUntitled)
       if (existingTab) {
         this.beforeDocumentChange()
+        this.applyDiskContent(existingTab, content)
         this._activeTabId = existingTab.id
         this.touch(existingTab)
         if (existingTab.sourceMissing) existingTab.sourceMissing = false
@@ -440,6 +449,97 @@ class TabStore {
     if (!this._workingDirectory) return Promise.resolve()
     this._refreshRequested += 1
     return this.ensureRefreshTask()
+  }
+
+  /**
+   * 核对已打开标签与磁盘是否一致。当前阅读或有未保存修改的标签只记录 externalContent
+   * 由用户手动刷新，避免打断阅读；其余干净标签静默换成磁盘新版本。
+   */
+  syncOpenFileContents(): Promise<void> {
+    if (this._contentSyncTask) {
+      this._contentSyncAgain = true
+      return this._contentSyncTask
+    }
+    this._contentSyncTask = (async () => {
+      try {
+        do {
+          this._contentSyncAgain = false
+          await this.checkOpenFileContents()
+        } while (this._contentSyncAgain)
+      } finally {
+        this._contentSyncTask = null
+      }
+    })()
+    return this._contentSyncTask
+  }
+
+  private async checkOpenFileContents(): Promise<void> {
+    if (this._isVirtualWorkspace) return
+    const generation = this._openGeneration
+    const targets = this._tabs.filter(tab => !tab.isUntitled && tab.path && !this._virtualFiles.has(normalizePath(tab.path)))
+    if (!targets.length) return
+    const fsAccess = await import('../lib/fsAccess')
+    const results = await Promise.all(targets.map(async (tab) => {
+      let stamp: string | undefined
+      try {
+        stamp = await fsAccess.allowAndStatFile(tab.path)
+      } catch {
+        stamp = undefined
+      }
+      if (stamp !== undefined && stamp === this._diskStamps.get(tab)) return null
+      try {
+        return { tab, stamp, content: await fsAccess.allowAndReadTextFile(tab.path) }
+      } catch {
+        // 丢失/不可读由目录刷新的 sourceMissing 负责，这里保留现有正文。
+        return null
+      }
+    }))
+    if (generation !== this._openGeneration) return
+    let changed = false
+    for (const result of results) {
+      if (!result || !this._tabs.includes(result.tab)) continue
+      if (result.stamp !== undefined) this._diskStamps.set(result.tab, result.stamp)
+      changed = this.applyDiskContent(result.tab, result.content) || changed
+    }
+    if (changed) this.emit()
+  }
+
+  /** 返回是否改变了标签状态；调用方负责 emit。 */
+  private applyDiskContent(tab: Tab, disk: string): boolean {
+    if (disk === tab.content) {
+      this._dismissedVersions.delete(tab)
+      if (tab.externalContent === undefined) return false
+      tab.externalContent = undefined
+      return true
+    }
+    if (disk === tab.externalContent || disk === this._dismissedVersions.get(tab)) return false
+    if (tab.isModified || tab.id === this._activeTabId) {
+      tab.externalContent = disk
+      return true
+    }
+    tab.content = disk
+    tab.externalContent = undefined
+    return true
+  }
+
+  /** 用户确认后换成磁盘新版本；先让正文记录阅读位置，换新后按锚点恢复。 */
+  reloadExternalChange(id: string): void {
+    const tab = this._tabs.find(item => item.id === id)
+    if (!tab || tab.externalContent === undefined) return
+    if (tab.id === this._activeTabId) this.beforeDocumentChange()
+    tab.content = tab.externalContent
+    tab.externalContent = undefined
+    tab.isModified = false
+    this.emit()
+  }
+
+  /** 保留当前版本；磁盘再次变化时会重新提示。 */
+  dismissExternalChange(id: string): void {
+    const tab = this._tabs.find(item => item.id === id)
+    if (!tab || tab.externalContent === undefined) return
+    this._dismissedVersions.set(tab, tab.externalContent)
+    tab.externalContent = undefined
+    this.emit()
   }
 
   private ensureRefreshTask(): Promise<void> {
