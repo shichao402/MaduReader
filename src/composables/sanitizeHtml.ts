@@ -27,7 +27,7 @@ export function sanitizeHtml(html: string): string {
     'viewBox', 'xmlns', 'd', 'cx', 'cy', 'r', 'x', 'y',
     'fill', 'stroke', 'stroke-width',
     'data-code', 'data-language', 'language',
-    'xlink:href', 'data-copy',
+    'xlink:href', 'data-copy', 'data-source-line', 'data-source-line-end',
     'loading',
     'encoding', 'mathvariant', 'displaystyle', 'stretchy', 'fence', 'separator', 'lspace', 'rspace', 'width', 'height', 'depth', 'linethickness', 'columnalign', 'rowalign', 'columnlines', 'rowlines', 'frame', 'open', 'close', 'form'
   ]

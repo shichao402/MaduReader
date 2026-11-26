@@ -186,7 +186,7 @@ describe('useMarkdown - Error Handling Coverage', () => {
       
       expect(html).toContain('你好世界')
       expect(html).toContain('这是中文内容')
-      expect(html).toContain('<li>')
+      expect(html).toContain('<li')
     })
 
     it('should handle markdown with RTL text', async () => {

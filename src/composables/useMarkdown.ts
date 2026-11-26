@@ -50,6 +50,10 @@ function createMarkdownIt() {
     }
   })
 
+  // 源码行号映射：给块级 token 注入 data-source-line / data-source-line-end，
+  // 供正文选区右键「复制为引用」推导源文件的精确块范围。
+  injectSourceLineMap(md)
+
   // 任务列表
   md.use(markdownItTaskLists, { enabled: true })
 
@@ -72,6 +76,42 @@ function createMarkdownIt() {
   md.use(markdownItMark)
 
   return md
+}
+
+/**
+ * 给带源码位置（token.map）的块级 token 注入 1-based 起止行。
+ * token.map 为 [startLine, endLine]（0-based，endLine 不含），因此 1-based 的
+ * 起始行是 startLine + 1，包含式结束行恰好是 endLine。
+ */
+function injectSourceLineMap(md: InstanceType<typeof MarkdownIt>): void {
+  const types = [
+    'paragraph_open', 'heading_open', 'blockquote_open',
+    'bullet_list_open', 'ordered_list_open', 'list_item_open',
+    'table_open', 'thead_open', 'tbody_open', 'tr_open',
+    'hr', 'fence', 'code_block', 'html_block',
+  ]
+  for (const type of types) {
+    const original = md.renderer.rules[type]
+    md.renderer.rules[type] = (tokens, idx, options, env, self) => {
+      const token = tokens[idx]
+      const map = token.map
+      if (map && token.nesting !== -1) {
+        token.attrSet('data-source-line', String(map[0] + 1))
+        token.attrSet('data-source-line-end', String(map[1]))
+      }
+      let rendered = original
+        ? original(tokens, idx, options, env, self)
+        : self.renderToken(tokens, idx, options)
+      // highlight 回调可直接返回完整 <pre>，此时 markdown-it 不会输出 token attrs。
+      if (map && !rendered.includes('data-source-line=')) {
+        rendered = rendered.replace(
+          /^(\s*<[a-z][^\s/>]*)/i,
+          `$1 data-source-line="${map[0] + 1}" data-source-line-end="${map[1]}"`,
+        )
+      }
+      return rendered
+    }
+  }
 }
 
 export function getMarkdownInstance(): InstanceType<typeof MarkdownIt> {

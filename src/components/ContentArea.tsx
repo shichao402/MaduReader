@@ -11,6 +11,7 @@ import { attachInlineDiagrams, type InlineDiagramsController } from '../lib/inli
 import ExportDialog from './ExportDialog'
 import MediaLightbox from './MediaLightbox'
 import ExternalChangeBanner from './ExternalChangeBanner'
+import SelectionContextMenu from './SelectionContextMenu'
 import { cn } from '../lib/utils'
 import { openUserPaths } from '../lib/openPaths'
 import { attachReadingColumn, type ReadingColumnController } from '../lib/readingColumn'
@@ -493,6 +494,12 @@ export default function ContentArea({
         <div role="status" className="flex-1 flex items-center justify-center text-sm text-[color:var(--color-text-secondary)]">正在加载文档…</div>
       ) : (
         <div key={rendered.tabId} ref={surfaceRef} className="reading-surface">
+        <SelectionContextMenu
+          className="flex flex-1 min-h-0 min-w-0"
+          documentPath={slideMode ? '' : rendered.path}
+          workingDirectory={tabStore.workingDirectory}
+          contentRef={contentRef}
+        >
         <div ref={scrollRef} data-reading-path={rendered.path} style={{ overflowAnchor: 'none' }} className="reading-scroll overflow-auto p-8 px-12">
           <div ref={columnRef} className={slideMode ? '' : 'reading-column animate-fade-in'}>
           <div
@@ -509,6 +516,7 @@ export default function ContentArea({
           />
           </div>
         </div>
+        </SelectionContextMenu>
         </div>
       )}
 

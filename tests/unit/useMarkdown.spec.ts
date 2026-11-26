@@ -21,7 +21,7 @@ describe('useMarkdown', () => {
       const markdown = 'Paragraph 1\n\nParagraph 2'
       const html = await renderMarkdownAsync(markdown)
       
-      expect(html).toContain('<p>')
+      expect(html).toContain('<p')
       expect(html).toContain('</p>')
     })
 
@@ -54,8 +54,8 @@ describe('useMarkdown', () => {
       const html = await renderMarkdownAsync(markdown)
       
       expect(html).toContain('<ul')
-      expect(html).toContain('<li>')
-      expect((html.match(/<li>/g) || []).length).toBe(3)
+      expect(html).toContain('<li')
+      expect((html.match(/<li(?:\s|>)/g) || []).length).toBe(3)
     })
 
     it('should render ordered lists', async () => {
@@ -63,7 +63,7 @@ describe('useMarkdown', () => {
       const html = await renderMarkdownAsync(markdown)
       
       expect(html).toContain('<ol')
-      expect(html).toContain('<li>')
+      expect(html).toContain('<li')
     })
 
     it('should render blockquotes', async () => {
@@ -179,7 +179,7 @@ const x = 1;
       const html = await renderMarkdownAsync(markdown)
       
       expect(html).toContain('<h1')
-      expect(html).toContain('<p>')
+      expect(html).toContain('<p')
       expect(html).toContain('<ul')
       expect(html).toContain('<pre')
       expect(html).toContain('<blockquote')
